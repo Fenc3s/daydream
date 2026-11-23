@@ -1,0 +1,14 @@
+{
+  "manifest_version": 3,
+  "name": "Daydream Save Image to Photos",
+  "version": "1.1.0",
+  "description": "Adds a browser image context-menu command that saves the selected image to Photos through Daydream.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAr3KgjoWT6CUWlUNS0n9uH8fKDL5UgrVwokCzIqO0pPNi3BTe+JjVlUf3QwsSnUwjRzXGcjl1finZ4fZShnZGVr3VXae2orQam5bx6qXUgwb7bM03tQMlmI4eO/iHdpt3zkooAZ5QNRgc8UxQHnwHSqIzJgBx3zZ95pN7+SSnPWp37W6avTZsFbNVM28D1QV7U8Z02KGwJbCvxyeEnTpSczS5zmk4NcampaLkGqCNdgN4tm02wsFG6/ZYQKWpZkuxpR8Y0kJYiPKuHauVEOzX/A11gmXsoyF7M7Vf0urqvqOAFFR8dXM96/P5beLuBt2Tm6Nyv2si0yaJen8s2TMUuwIDAQAB",
+  "permissions": [
+    "contextMenus",
+    "nativeMessaging"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  }
+}

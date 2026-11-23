@@ -1,0 +1,208 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>daydream icon preview</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f4f1ec;
+      --ink: #25304d;
+      --muted: #68728d;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background:
+        radial-gradient(circle at top left, rgba(255,255,255,0.7), transparent 38%),
+        linear-gradient(180deg, #f7f4ef, #f2eeea);
+      color: var(--ink);
+      font-family: ui-rounded, "SF Pro Rounded", "SF Pro Display", system-ui, sans-serif;
+    }
+    .wrap {
+      max-width: 1520px;
+      margin: 0 auto;
+      padding: 54px 48px 72px;
+    }
+    h1 {
+      margin: 0 0 10px;
+      font-size: 40px;
+      line-height: 1.05;
+      letter-spacing: -0.03em;
+      font-weight: 700;
+    }
+    p {
+      margin: 0 0 38px;
+      color: var(--muted);
+      font-size: 20px;
+      line-height: 1.4;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 38px;
+      align-items: start;
+    }
+    .card {
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .icon {
+      position: relative;
+      aspect-ratio: 1;
+      border-radius: 30%;
+      overflow: hidden;
+      box-shadow:
+        inset 0 1px 0 rgba(255,255,255,0.9),
+        inset 0 -16px 28px rgba(67, 83, 126, 0.08),
+        0 20px 44px rgba(48, 58, 88, 0.18);
+      isolation: isolate;
+    }
+    .icon::before {
+      content: "";
+      position: absolute;
+      inset: 2.8%;
+      border-radius: 28%;
+      border: 1px solid rgba(255,255,255,0.34);
+      pointer-events: none;
+      z-index: 4;
+    }
+    .icon::after {
+      content: "";
+      position: absolute;
+      inset: 8%;
+      border-radius: 25%;
+      border: 8px solid rgba(255,255,255,0.1);
+      filter: blur(1px);
+      pointer-events: none;
+      z-index: 1;
+    }
+    .sparkles {
+      background:
+        radial-gradient(circle at 24% 18%, rgba(255,255,255,0.92), transparent 28%),
+        radial-gradient(circle at 76% 76%, rgba(154,215,255,0.55), transparent 32%),
+        radial-gradient(circle at 68% 24%, rgba(255,208,232,0.42), transparent 28%),
+        linear-gradient(180deg, #f8f3ff 0%, #dee7ff 48%, #bfe7ff 100%);
+    }
+    .cloud-star {
+      background:
+        radial-gradient(circle at 78% 22%, rgba(255,255,255,0.95), transparent 24%),
+        radial-gradient(circle at 22% 82%, rgba(255,194,217,0.48), transparent 30%),
+        radial-gradient(circle at 84% 66%, rgba(255,235,190,0.34), transparent 25%),
+        linear-gradient(180deg, #edf5ff 0%, #dbe6ff 42%, #f4dff3 100%);
+    }
+    .stars {
+      background:
+        radial-gradient(circle at 50% 14%, rgba(255,255,255,0.95), transparent 24%),
+        radial-gradient(circle at 80% 72%, rgba(167,225,255,0.45), transparent 28%),
+        radial-gradient(circle at 16% 24%, rgba(255,218,238,0.3), transparent 22%),
+        linear-gradient(180deg, #f4f1ff 0%, #dce4ff 44%, #bfe5ff 100%);
+    }
+    .glyph-wrap {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      z-index: 3;
+    }
+    .glyph-shadow {
+      position: absolute;
+      inset: 0;
+      display: grid;
+      place-items: center;
+      filter: blur(16px);
+      opacity: 0.34;
+      transform: translateY(16px);
+      z-index: 2;
+    }
+    svg {
+      width: 60%;
+      height: 60%;
+      stroke: #fffaf5;
+      stroke-width: 1.7;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      fill: none;
+    }
+    .glyph-shadow svg {
+      stroke: rgba(53, 69, 110, 0.9);
+    }
+    h2 {
+      margin: 0;
+      font-size: 26px;
+      line-height: 1.15;
+      letter-spacing: -0.02em;
+      font-weight: 650;
+    }
+    .meta {
+      color: var(--muted);
+      font-size: 18px;
+      line-height: 1.45;
+    }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <h1>Open-source directions for daydream</h1>
+    <p>Three real icon candidates based on Tabler Icons (MIT), shown as app-icon mockups rather than broken SVG thumbnails.</p>
+    <div class="grid">
+      <section class="card">
+        <div class="icon sparkles">
+          <div class="glyph-shadow">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6"/>
+            </svg>
+          </div>
+          <div class="glyph-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M16 18a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m0 -12a2 2 0 0 1 2 2a2 2 0 0 1 2 -2a2 2 0 0 1 -2 -2a2 2 0 0 1 -2 2m-7 12a6 6 0 0 1 6 -6a6 6 0 0 1 -6 -6a6 6 0 0 1 -6 6a6 6 0 0 1 6 6"/>
+            </svg>
+          </div>
+        </div>
+        <h2>Sparkles</h2>
+        <div class="meta">Most abstract. Dreamy without drifting into night or sleep metaphors.</div>
+      </section>
+      <section class="card">
+        <div class="icon cloud-star">
+          <div class="glyph-shadow">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9.5 18.004h-2.843c-2.572 -.004 -4.657 -2.011 -4.657 -4.487c0 -2.475 2.085 -4.482 4.657 -4.482c.393 -1.762 1.794 -3.2 3.675 -3.773c1.88 -.572 3.956 -.193 5.444 1c1.209 .967 1.88 2.347 1.88 3.776"/>
+              <path d="M17.8 20.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+            </svg>
+          </div>
+          <div class="glyph-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M9.5 18.004h-2.843c-2.572 -.004 -4.657 -2.011 -4.657 -4.487c0 -2.475 2.085 -4.482 4.657 -4.482c.393 -1.762 1.794 -3.2 3.675 -3.773c1.88 -.572 3.956 -.193 5.444 1c1.209 .967 1.88 2.347 1.88 3.776"/>
+              <path d="M17.8 20.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+            </svg>
+          </div>
+        </div>
+        <h2>Cloud Star</h2>
+        <div class="meta">Closest to the name daydream, but still a bit literal and softer than the other two.</div>
+      </section>
+      <section class="card">
+        <div class="icon stars">
+          <div class="glyph-shadow">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.8 19.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+              <path d="M6.2 19.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+              <path d="M12 9.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+            </svg>
+          </div>
+          <div class="glyph-wrap">
+            <svg viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M17.8 19.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+              <path d="M6.2 19.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+              <path d="M12 9.817l-2.172 1.138a.392 .392 0 0 1 -.568 -.41l.415 -2.411l-1.757 -1.707a.389 .389 0 0 1 .217 -.665l2.428 -.352l1.086 -2.193a.392 .392 0 0 1 .702 0l1.086 2.193l2.428 .352a.39 .39 0 0 1 .217 .665l-1.757 1.707l.414 2.41a.39 .39 0 0 1 -.567 .411l-2.172 -1.138"/>
+            </svg>
+          </div>
+        </div>
+        <h2>Stars</h2>
+        <div class="meta">Cleanest silhouette, but still a bit generic unless we refine it further.</div>
+      </section>
+    </div>
+  </div>
+</body>
+</html>
