@@ -29,7 +29,7 @@ struct AppSettings: Codable, Equatable, Sendable {
     var obsidianSubfolder: String
     var commands: [AICommand]
 
-    static let defaultObsidianVaultName = "Obsidian Vault"
+    static let defaultObsidianVaultName = "Apple Vault"
 
     static let retiredModelCatalog: Set<String> = [
         "gemini-3-flash-preview:latest",
@@ -42,13 +42,10 @@ struct AppSettings: Codable, Equatable, Sendable {
     ]
 
     static let defaultOpenRouterModelCatalog = [
-        "google/gemini-3.6-flash",
         "google/gemini-3.5-flash-lite",
-        "openai/gpt-5.6-luna",
-        "openai/gpt-5.6-terra",
-        "openai/gpt-5.6-sol",
-        "anthropic/claude-haiku-4.5",
-        "anthropic/claude-sonnet-4.6"
+        "openai/gpt-6-luna",
+        "google/gemini-3.8-flash",
+        "deepseek/deepseek-v4.1-flash-1017"
     ]
 
     static let deepSeekFlashModel = "deepseek-v4-flash"
@@ -58,35 +55,69 @@ struct AppSettings: Codable, Equatable, Sendable {
         deepSeekProModel
     ]
 
-    static let chatGPTDefaultModel = "gpt-5.4"
+    static let chatGPTDefaultModel = "gpt-6-luna"
     static let defaultChatGPTModelCatalog = [
-        "gpt-5.4",
-        "gpt-5.4-mini",
-        "gpt-4o"
+        "gpt-6-luna"
     ]
 
-    static let openRouterDefaultModel = "google/gemini-3.5-flash-lite"
+    static let openRouterDefaultModel = "openai/gpt-6-luna"
     static let deepSeekDefaultModel = deepSeekFlashModel
+    static let defaultClipboardHistoryShortcut = KeyboardShortcut(
+        keyCode: UInt16(kVK_ANSI_V),
+        modifiers: [.command, .option]
+    )
     static let defaultMoveWindowShortcut = KeyboardShortcut(
         keyCode: UInt16(kVK_ANSI_D),
         modifiers: [.command, .option]
     )
     static let `default` = AppSettings(
-        provider: .openRouter,
+        provider: .chatGPT,
+        defaultReasoningByModel: [
+            AIProvider.chatGPT.rawValue: [
+                "gpt-6-luna": .low,
+            ],
+            "GenAI Bridge": [
+                "deepseek-v4.1-flash": .noEffort,
+                "gcp:gemini-3.5-flash-lite": .minimal,
+                "gcp:gemini-3.8-flash": .low,
+                "gcp:gemini-4-hydrogen": .minimal,
+                "glm-53": .low,
+            ],
+            AIProvider.openRouter.rawValue: [
+                "google/gemini-3.5-flash-lite": .minimal,
+                "openai/gpt-6-luna": .disabled,
+            ],
+        ],
         openRouterBaseURL: "https://openrouter.ai/api/v1",
         openRouterAPIKey: "",
         deepSeekBaseURL: "https://api.deepseek.com",
         deepSeekAPIKey: "",
         chatGPTBaseURL: "https://api.openai.com/v1",
         providerModelCatalogs: defaultProviderModelCatalogs,
-        defaultModel: openRouterDefaultModel,
+        defaultModel: chatGPTDefaultModel,
         providerDefaultModels: defaultProviderDefaultModels,
-        clipboardHistoryShortcut: nil,
+        clipboardHistoryShortcut: defaultClipboardHistoryShortcut,
         moveWindowShortcut: defaultMoveWindowShortcut,
         clipboardHistoryRetention: .oneMonth,
         memoryEnabled: true,
         memoryLimit: 80,
         iCloudPasswordsDiaAutomationEnabled: true,
+        inputSourceSwitchingEnabled: true,
+        defaultEnglishInputSourceID: "com.apple.keylayout.US",
+        appInputSourceRules: [
+            AppInputSourceRule(
+                bundleIdentifier: "com.apple.Spotlight",
+                appName: "Spotlight",
+                inputSourceID: "com.apple.keylayout.US",
+                isEnabled: true
+            ),
+            AppInputSourceRule(
+                bundleIdentifier: "com.tencent.xinWeChat",
+                appName: "WeChat",
+                inputSourceID: "com.apple.inputmethod.SCIM.ITABC",
+                isEnabled: true
+            ),
+        ],
         obsidianVaultName: defaultObsidianVaultName,
         obsidianSubfolder: "",
         commands: AICommand.defaultCommands
@@ -121,6 +152,7 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     init(
         provider: AIProvider,
+        defaultReasoningByModel: [String: [String: ReasoningMode]] = [:],
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -135,11 +167,15 @@ struct AppSettings: Codable, Equatable, Sendable {
         memoryEnabled: Bool,
         memoryLimit: Int,
         iCloudPasswordsDiaAutomationEnabled: Bool,
+        inputSourceSwitchingEnabled: Bool = true,
+        defaultEnglishInputSourceID: String? = nil,
+        appInputSourceRules: [AppInputSourceRule] = [],
         obsidianVaultName: String = defaultObsidianVaultName,
         obsidianSubfolder: String = "",
         commands: [AICommand]
     ) {
         self.provider = provider
+        self.defaultReasoningByModel = defaultReasoningByModel
         self.openRouterBaseURL = openRouterBaseURL
         self.openRouterAPIKey = openRouterAPIKey
         self.deepSeekBaseURL = deepSeekBaseURL
@@ -159,6 +195,9 @@ struct AppSettings: Codable, Equatable, Sendable {
         self.memoryEnabled = memoryEnabled
         self.memoryLimit = Self.normalizedMemoryLimit(memoryLimit)
         self.iCloudPasswordsDiaAutomationEnabled = iCloudPasswordsDiaAutomationEnabled
+        self.inputSourceSwitchingEnabled = inputSourceSwitchingEnabled
+        self.defaultEnglishInputSourceID = Self.normalizedOptionalIdentifier(defaultEnglishInputSourceID)
+        self.appInputSourceRules = Self.normalizedAppInputSourceRules(appInputSourceRules)
         self.obsidianVaultName = obsidianVaultName
         self.obsidianSubfolder = obsidianSubfolder
         self.commands = commands
@@ -616,20 +655,100 @@ struct AICommand: Identifiable, Codable, Equatable, Sendable {
             commandID: "define-word",
             title: "Define Word",
             promptTemplate: """
-            Provide the pronunciation and detailed definitions of {{text}}. For each meaning, include a bilingual explanation (English + Chinese), and a bilingual example sentence on the same line with the word {{text}} highlighted in bold. Then, list the word’s synonyms and antonyms (with Chinese translations), and etymology (with Chinese explanation). Present everything in a obsidian friendly markdown format. Start with: 
+            # Goal
+
+            Create an Obsidian-friendly English vocabulary note for Chinese native speakers learning English.
+
+            The note should feel like a beginner-friendly AI dictionary:
+            - Chinese-first
+            - natural and easy to understand
+            - concise but informative
+            - focused on helping users truly understand how the word feels and is used
+
             ---
-            tags:
-              - "#vocab"
-            links:
-              - "[[Vocabulary Overview]]"
+
+            # Title Rules
+
+            The H1 title must contain only the original word.
+
+            Correct:
+            # {{text}}
+
+            Incorrect:
+            # Definition: {{text}}
+            # Vocabulary: {{text}}
+
             ---
+
+            # Content Structure
+
+            Use the following structure:
+
+            # {{text}}
+
+            ## Pronunciation
+
+            ## Word Feeling / Nuance
+
+            Explain:
+            - emotional feeling
+            - tone
+            - native usage habits
+            - contextual implications
+
+            ## Meanings
+
+            For each meaning:
+            - concise Chinese explanation
+            - short/simple English definition
+            - one bilingual example sentence
+
+            ## Common Collocations
+
+            ## Synonyms & Antonyms
+
+            Include Chinese translations.
+
+            ## Etymology
+
+            Explain in both English and Chinese.
+
+            ---
+
+            # Language Rules
+
+            - Prioritize Chinese explanations over English
+            - Chinese should sound natural to native Chinese speakers
+            - Avoid literal translation style
+            - English definitions should be simple and beginner-friendly
+            - Avoid academic dictionary language
+
+            ---
+
+            # Formatting Rules
+
+            - Use clean Obsidian-friendly markdown
+            - Use section-based formatting
+            - Avoid large markdown tables
+            - Highlight {{text}} in bold in example sentences
+
+            ---
+
+            Start with:
 
             Command: {{command_title}}
 
             Text:
             {{text}}
             """,
-            saveToObsidian: true
+            shortcut: KeyboardShortcut(
+                keyCode: UInt16(kVK_ANSI_Backslash),
+                modifiers: [.command, .option]
+            ),
+            reasoningMode: .disabled,
+            useDefaultReasoning: false,
+            showPopup: true,
+            saveToObsidian: false
         ),
         AICommand(
             commandID: "translate-en",
@@ -638,28 +757,46 @@ struct AICommand: Identifiable, Codable, Equatable, Sendable {
             Translate {{text}} to English.
             Fixing any spelling and grammar errors
             Rephrase the sentence to make it more fluent and closer to native expression(If necessary)
+            Preserve existing paragraph breaks exactly. If the source has no paragraph breaks and appears to contain multiple paragraphs, divide the translation at natural topic boundaries. Do not split code, URLs, lists, or quoted text merely for visual balance.
             Do not return anything other than the translated text. Do not wrap responses in quotes.
 
             Command: {{command_title}}
 
             Text:
             {{text}}
-            """
+            """,
+            shortcut: KeyboardShortcut(
+                keyCode: UInt16(kVK_ANSI_RightBracket),
+                modifiers: [.command, .option]
+            ),
+            reasoningMode: .low,
+            useDefaultReasoning: false,
+            showPopup: true,
+            saveToObsidian: false
         ),
         AICommand(
             commandID: "translate-zh",
             title: "Translate to Chinese",
             promptTemplate: """
-            Translate {{text}} to Chinese.
+            Translate {{text}} to simplified Chinese.
             Fixing any spelling and grammar errors
             Rephrase the sentence to make it more fluent and closer to native expression(If necessary)
+            Preserve the original paragraph structure and line breaks. Do not merge separate paragraphs.
             Do not return anything other than the translated text. Do not wrap responses in quotes.
 
             Command: {{command_title}}
 
             Text:
             {{text}}
-            """
+            """,
+            shortcut: KeyboardShortcut(
+                keyCode: UInt16(kVK_ANSI_LeftBracket),
+                modifiers: [.command, .option]
+            ),
+            reasoningMode: .low,
+            useDefaultReasoning: false,
+            showPopup: true,
+            saveToObsidian: false
         ),
         AICommand(
             commandID: "summarize",
@@ -672,7 +809,11 @@ struct AICommand: Identifiable, Codable, Equatable, Sendable {
 
             Text:
             {{text}}
-            """
+            """,
+            reasoningMode: .modelDefault,
+            useDefaultReasoning: true,
+            showPopup: true,
+            saveToObsidian: false
         ),
     ]
 

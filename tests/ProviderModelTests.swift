@@ -13,6 +13,7 @@ struct ProviderModelTests {
             precondition(value(), message)
         }
         var legacy = AppSettings.default
+        legacy.provider = .openRouter
         legacy.openRouterBaseURL = "https://custom.example/v1"
         legacy.openRouterAPIKey = "preserved-manual-key"
         legacy.providerModelCatalogs[AIProvider.openRouter.rawValue] = [AppSettings.openRouterDefaultModel, "custom-model"]
@@ -182,6 +183,7 @@ struct ProviderModelTests {
         }
         let preferenceStore = SettingsStore(directory: settingsDirectory)
         var modelSettings = AppSettings.default
+        modelSettings.provider = .openRouter
         modelSettings.providerModelCatalogs[AIProvider.openRouter.rawValue] = ["model-a", "model-b"]
         modelSettings.setDefaultModel("model-a", for: .openRouter)
         modelSettings.setDefaultReasoningMode(.low, for: "model-a", provider: .openRouter)
