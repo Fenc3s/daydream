@@ -67,7 +67,6 @@ final class AppModel {
     // MARK: - Private Properties
 
     @ObservationIgnored private let settingsStore: SettingsStore
-    @ObservationIgnored private let iCloudSyncService: ICloudSyncService
     @ObservationIgnored private let memoryStore: MemoryStore
     @ObservationIgnored private let logger: AppLogger
     @ObservationIgnored private let gitVersionService: GitVersionService
@@ -101,7 +100,6 @@ final class AppModel {
     @ObservationIgnored private var lastExternalApplication: ExternalApplicationTarget?
     @ObservationIgnored private var lastClipboardHistoryApplication: ExternalApplicationTarget?
     @ObservationIgnored private var clipboardHistoryTargetApplication: ExternalApplicationTarget?
-    @ObservationIgnored private var isApplyingICloudUpdate = false
     @ObservationIgnored private var activeCommandTask: Task<Void, Never>?
     @ObservationIgnored private var activeWindowMoveTask: Task<Void, Never>?
 
@@ -109,12 +107,10 @@ final class AppModel {
 
     init() {
         let settingsStore = SettingsStore()
-        let iCloudSyncService = ICloudSyncService()
         let memoryStore = MemoryStore()
         let logger = AppLogger.shared
         let gitVersionService = GitVersionService()
         self.settingsStore = settingsStore
-        self.iCloudSyncService = iCloudSyncService
         self.memoryStore = memoryStore
         self.logger = logger
         self.gitVersionService = gitVersionService
@@ -169,20 +165,11 @@ final class AppModel {
     func bootstrap() async {
         guard !isBootstrapped else { return }
         isBootstrapped = true
-        iCloudSyncService.refreshAvailability()
-        if settingsStore.prefersICloudSync(),
-           let settingsURL = iCloudSyncService.syncedURL(for: .settings) {
-            iCloudSyncService.migrateLocalFilesIfNeeded()
-            settingsStore.useSyncedFileURL(settingsURL)
-        } else {
-            settingsStore.useSyncedFileURL(nil)
-        }
         settings = settingsStore.load(activeProviderOnly: true)
         normalizeCommandSettingsForCurrentProvider()
         if settingsStore.migrateCommandReasoningInheritance(in: &settings) {
             settingsStore.save(settings)
         }
-        configureICloudSyncIfNeeded(migrate: false)
         lastPrunedRetention = settings.clipboardHistoryRetention
         memoryEntries = memoryStore.load().entries
         pruneMemoryEntriesIfNeeded()
@@ -214,7 +201,6 @@ final class AppModel {
     func saveSettings(reloadHotKeys: Bool = false) {
         settings.memoryLimit = AppSettings.normalizedMemoryLimit(settings.memoryLimit)
         normalizeCommandSettingsForCurrentProvider()
-        configureICloudSyncIfNeeded()
         let snapshot = settings
         settingsStore.save(snapshot)
         pruneMemoryEntriesIfNeeded()
@@ -254,12 +240,6 @@ final class AppModel {
         settings.commands = AICommand.defaultCommands
         selectedCommandStableID = settings.commands.first?.id
         saveSettings(reloadHotKeys: true)
-    }
-
-    func setSyncWithICloud(_ isEnabled: Bool) {
-        settings.syncWithICloud = isEnabled
-        configureICloudSyncIfNeeded(migrate: isEnabled)
-        saveSettings()
     }
 
     func setICloudPasswordsDiaAutomationEnabled(_ isEnabled: Bool) {
@@ -648,7 +628,6 @@ final class AppModel {
         let baseURL: String
         let apiKey: String
         switch provider {
-        case .openAICompatible: (baseURL, apiKey) = (settings.apiBaseURL, settings.apiKey)
         case .openRouter: (baseURL, apiKey) = (settings.openRouterBaseURL, settings.openRouterAPIKey)
         case .deepSeek: (baseURL, apiKey) = (settings.deepSeekBaseURL, settings.deepSeekAPIKey)
         }
@@ -661,7 +640,6 @@ final class AppModel {
                 let currentURL: String
                 let currentKey: String
                 switch provider {
-                case .openAICompatible: (currentURL, currentKey) = (settings.apiBaseURL, settings.apiKey)
                 case .openRouter: (currentURL, currentKey) = (settings.openRouterBaseURL, settings.openRouterAPIKey)
                 case .deepSeek: (currentURL, currentKey) = (settings.deepSeekBaseURL, settings.deepSeekAPIKey)
                 }
@@ -679,9 +657,6 @@ final class AppModel {
                     }
                 }
                 modelCapabilities[providerID] = capabilities
-                if provider == .openAICompatible {
-                    await refreshVerifiedReasoningCapabilities(models: models, baseURL: baseURL, apiKey: apiKey)
-                }
                 if provider == .openRouter { openRouterReasoningCapabilities = capabilities }
                 modelCatalogStatus[providerID] = "Loaded \(models.count) models. Select Add to make a model available in commands."
             } catch {
@@ -690,48 +665,8 @@ final class AppModel {
         }
     }
 
-    private func refreshVerifiedReasoningCapabilities(models: [String], baseURL: String, apiKey: String) async {
-        let providerID = AIProvider.openAICompatible.rawValue
-        let bundled = localVerifiedReasoningCapabilities
-        var didUpdateSettings = false
-        var didUpdateLocalCache = false
-        for model in models {
-            if settings.verifiedReasoningCapabilities[providerID]?[model]?.isFresh(for: baseURL) != true,
-               let entry = bundled[model], entry.isFresh(for: baseURL) {
-                settings.verifiedReasoningCapabilities[providerID, default: [:]][model] = entry
-                didUpdateSettings = true
-            }
-        }
-        let missing = models.filter {
-            modelCapabilities[providerID]?[$0]?.supportedEfforts == nil && settings.verifiedReasoningCapabilities[providerID]?[$0]?.isFresh(for: baseURL) != true
-        }
-        defer {
-            if didUpdateLocalCache {
-                VerifiedReasoningCapability.store(localVerifiedReasoningCapabilities)
-            }
-            if didUpdateSettings {
-                saveSettings()
-            }
-        }
-        if !missing.isEmpty {
-            let key = apiKey.trimmingCharacters(in: .whitespacesAndNewlines)
-            for (index, model) in missing.enumerated() {
-                guard settings.apiBaseURL == baseURL, settings.apiKey == apiKey else { return }
-                modelCatalogStatus[providerID] = "Checking reasoning \(index + 1)/\(missing.count): \(model)"
-                let capability = await ReasoningCapabilityDiscovery.discover(model: model, baseURL: baseURL, apiKey: key)
-                guard settings.apiBaseURL == baseURL, settings.apiKey == apiKey else { return }
-                settings.verifiedReasoningCapabilities[providerID, default: [:]][model] = capability
-                localVerifiedReasoningCapabilities[model] = capability
-                didUpdateLocalCache = true
-                didUpdateSettings = true
-            }
-        }
-    }
-
     func verifiedReasoningCapability(for model: String, provider: AIProvider) -> VerifiedReasoningCapability? {
-        guard provider == .openAICompatible else { return nil }
-        let candidates = [settings.verifiedReasoningCapabilities[provider.rawValue]?[model], localVerifiedReasoningCapabilities[model]]
-        return candidates.compactMap { $0 }.first { $0.isFresh(for: settings.apiBaseURL) }
+        nil
     }
 
     func availableReasoningModes(for model: String, provider: AIProvider? = nil) -> [ReasoningMode] {
@@ -811,62 +746,6 @@ final class AppModel {
         settings.providerModelCatalogs = AppSettings.normalizedProviderModelCatalogs(settings.providerModelCatalogs)
         settings.setDefaultModel(settings.defaultModel(for: provider), for: provider)
         saveSettings()
-    }
-
-    private func configureICloudSyncIfNeeded(migrate: Bool = true) {
-        iCloudSyncService.refreshAvailability()
-        guard settings.syncWithICloud,
-              let settingsURL = iCloudSyncService.syncedURL(for: .settings) else {
-            settingsStore.useSyncedFileURL(nil)
-            iCloudSyncService.stopObserving()
-            return
-        }
-
-        if migrate {
-            iCloudSyncService.migrateLocalFilesIfNeeded()
-        }
-        settingsStore.useSyncedFileURL(settingsURL)
-        iCloudSyncService.startObserving { [weak self] changedFiles in
-            self?.applyICloudChanges(changedFiles)
-        }
-    }
-
-    private func applyICloudChanges(_ changedFiles: Set<ICloudSyncFile>) {
-        guard settings.syncWithICloud, !isApplyingICloudUpdate else { return }
-        isApplyingICloudUpdate = true
-        defer { isApplyingICloudUpdate = false }
-        var appliedFiles = Set<ICloudSyncFile>()
-
-        if changedFiles.contains(.settings) {
-            let previousSyncSetting = settings.syncWithICloud
-            let previousDefaultEnglishID = settings.defaultEnglishInputSourceID
-            let previousAppRules = settings.appInputSourceRules
-            var updatedSettings = settingsStore.load(activeProviderOnly: true)
-            updatedSettings.syncWithICloud = previousSyncSetting
-            normalizeCommandSettingsForCurrentProvider(&updatedSettings)
-
-            if updatedSettings != settings {
-                settings = updatedSettings
-                pruneMemoryEntriesIfNeeded()
-                recomputeCommandIssues()
-                reconfigureHotKeys()
-                if settings.defaultEnglishInputSourceID != previousDefaultEnglishID ||
-                    settings.appInputSourceRules != previousAppRules {
-                    configureInputSourceSwitching()
-                }
-                appliedFiles.insert(.settings)
-            }
-        }
-
-        guard !appliedFiles.isEmpty else { return }
-        refreshLightweightDiagnostics()
-        Task {
-            await logger.log(
-                "icloud",
-                "Applied synced file changes",
-                metadata: ["files": appliedFiles.map(\.fileName).sorted().joined(separator: ",")]
-            )
-        }
     }
 
     func restoreClipboardEntry(_ entry: ClipboardHistoryEntry) {
@@ -1141,8 +1020,6 @@ final class AppModel {
         do {
             let summary = try await openAIClient.generateText(
                 provider: settings.provider,
-                openAICompatibleBaseURL: settings.apiBaseURL,
-                openAICompatibleAPIKey: settings.apiKey,
                 openRouterBaseURL: settings.openRouterBaseURL,
                 openRouterAPIKey: settings.openRouterAPIKey,
                 deepSeekBaseURL: settings.deepSeekBaseURL,
@@ -1215,8 +1092,6 @@ final class AppModel {
         diagnostics.logFilePath = logger.logFileURL.path
         diagnostics.versionLogFilePath = gitVersionService.versionLogFileURL.path
         diagnostics.settingsFilePath = settingsStore.fileURL.path
-        diagnostics.iCloudSyncAvailable = iCloudSyncService.isAvailable
-        diagnostics.iCloudSyncDirectoryPath = iCloudSyncService.iCloudDirectory?.path ?? ""
         diagnostics.registeredHotKeys = settings.commands.compactMap { command in
             guard let shortcut = command.shortcut else { return nil }
             return "\(command.title)  \(shortcut.displayString)"
@@ -1327,8 +1202,6 @@ final class AppModel {
             var receivedFirstOutput = false
             for try await delta in openAIClient.streamText(
                 provider: requestSettings.provider,
-                openAICompatibleBaseURL: requestSettings.apiBaseURL,
-                openAICompatibleAPIKey: requestSettings.apiKey,
                 openRouterBaseURL: requestSettings.openRouterBaseURL,
                 openRouterAPIKey: requestSettings.openRouterAPIKey,
                 deepSeekBaseURL: requestSettings.deepSeekBaseURL,

@@ -41,8 +41,6 @@ final class AIClient {
 
     func generateText(
         provider: AIProvider,
-        openAICompatibleBaseURL: String,
-        openAICompatibleAPIKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -52,8 +50,6 @@ final class AIClient {
     ) async throws -> String {
         try await generateText(
             provider: provider,
-            openAICompatibleBaseURL: openAICompatibleBaseURL,
-            openAICompatibleAPIKey: openAICompatibleAPIKey,
             openRouterBaseURL: openRouterBaseURL,
             openRouterAPIKey: openRouterAPIKey,
             deepSeekBaseURL: deepSeekBaseURL,
@@ -67,8 +63,6 @@ final class AIClient {
 
     func generateText(
         provider: AIProvider,
-        openAICompatibleBaseURL: String,
-        openAICompatibleAPIKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -88,9 +82,6 @@ final class AIClient {
         let apiKey: String
 
         switch provider {
-        case .openAICompatible:
-            baseURLString = openAICompatibleBaseURL
-            apiKey = openAICompatibleAPIKey
         case .openRouter:
             baseURLString = openRouterBaseURL
             apiKey = openRouterAPIKey
@@ -168,8 +159,6 @@ final class AIClient {
 
     func streamText(
         provider: AIProvider,
-        openAICompatibleBaseURL: String,
-        openAICompatibleAPIKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -179,8 +168,6 @@ final class AIClient {
     ) -> AsyncThrowingStream<String, Error> {
         streamText(
             provider: provider,
-            openAICompatibleBaseURL: openAICompatibleBaseURL,
-            openAICompatibleAPIKey: openAICompatibleAPIKey,
             openRouterBaseURL: openRouterBaseURL,
             openRouterAPIKey: openRouterAPIKey,
             deepSeekBaseURL: deepSeekBaseURL,
@@ -194,8 +181,6 @@ final class AIClient {
 
     func streamText(
         provider: AIProvider,
-        openAICompatibleBaseURL: String,
-        openAICompatibleAPIKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -221,8 +206,6 @@ final class AIClient {
                         try Task.checkCancellation()
                         let request = try await makeChatCompletionsRequest(
                             provider: provider,
-                            openAICompatibleBaseURL: openAICompatibleBaseURL,
-                            openAICompatibleAPIKey: openAICompatibleAPIKey,
                             openRouterBaseURL: openRouterBaseURL,
                             openRouterAPIKey: openRouterAPIKey,
                             deepSeekBaseURL: deepSeekBaseURL,
@@ -301,8 +284,6 @@ final class AIClient {
 
     private func makeChatCompletionsRequest(
         provider: AIProvider,
-        openAICompatibleBaseURL: String,
-        openAICompatibleAPIKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -316,9 +297,6 @@ final class AIClient {
         let apiKey: String
 
         switch provider {
-        case .openAICompatible:
-            baseURLString = openAICompatibleBaseURL
-            apiKey = openAICompatibleAPIKey
         case .openRouter:
             baseURLString = openRouterBaseURL
             apiKey = openRouterAPIKey

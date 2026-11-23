@@ -9,8 +9,6 @@ struct AppSettings: Codable, Equatable, Sendable {
     var reasoningEffortOverrides: [String: [String: [ReasoningMode]]] = [:]
     var defaultReasoningByModel: [String: [String: ReasoningMode]] = [:]
     var verifiedReasoningCapabilities: [String: [String: VerifiedReasoningCapability]] = [:]
-    var apiBaseURL: String
-    var apiKey: String
     var openRouterBaseURL: String
     var openRouterAPIKey: String
     var deepSeekBaseURL: String
@@ -23,7 +21,6 @@ struct AppSettings: Codable, Equatable, Sendable {
     var clipboardHistoryRetention: ClipboardHistoryRetention
     var memoryEnabled: Bool
     var memoryLimit: Int
-    var syncWithICloud: Bool
     var iCloudPasswordsDiaAutomationEnabled: Bool
     var inputSourceSwitchingEnabled: Bool = true
     var defaultEnglishInputSourceID: String? = nil
@@ -33,12 +30,6 @@ struct AppSettings: Codable, Equatable, Sendable {
     var commands: [AICommand]
 
     static let defaultObsidianVaultName = "Obsidian Vault"
-
-    static let defaultOpenAICompatibleModelCatalog = [
-        "gpt-4o-mini",
-        "gpt-4o",
-        "o3-mini",
-    ]
 
     static let retiredModelCatalog: Set<String> = [
         "gemini-3-flash-preview:latest",
@@ -67,7 +58,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         deepSeekProModel
     ]
 
-    static let openAICompatibleDefaultModel = "gpt-4o-mini"
     static let openRouterDefaultModel = "google/gemini-3.5-flash-lite"
     static let deepSeekDefaultModel = deepSeekFlashModel
     static let defaultMoveWindowShortcut = KeyboardShortcut(
@@ -75,22 +65,19 @@ struct AppSettings: Codable, Equatable, Sendable {
         modifiers: [.command, .option]
     )
     static let `default` = AppSettings(
-        provider: .openAICompatible,
-        apiBaseURL: "https://api.openai.com/v1",
-        apiKey: "",
+        provider: .openRouter,
         openRouterBaseURL: "https://openrouter.ai/api/v1",
         openRouterAPIKey: "",
         deepSeekBaseURL: "https://api.deepseek.com",
         deepSeekAPIKey: "",
         providerModelCatalogs: defaultProviderModelCatalogs,
-        defaultModel: openAICompatibleDefaultModel,
+        defaultModel: openRouterDefaultModel,
         providerDefaultModels: defaultProviderDefaultModels,
         clipboardHistoryShortcut: nil,
         moveWindowShortcut: defaultMoveWindowShortcut,
         clipboardHistoryRetention: .oneMonth,
         memoryEnabled: true,
         memoryLimit: 80,
-        syncWithICloud: true,
         iCloudPasswordsDiaAutomationEnabled: true,
         obsidianVaultName: defaultObsidianVaultName,
         obsidianSubfolder: "",
@@ -103,8 +90,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         case reasoningEffortOverrides
         case defaultReasoningByModel
         case verifiedReasoningCapabilities
-        case apiBaseURL
-        case apiKey
         case openRouterBaseURL
         case openRouterAPIKey
         case deepSeekBaseURL
@@ -117,7 +102,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         case clipboardHistoryRetention
         case memoryEnabled
         case memoryLimit
-        case syncWithICloud
         case iCloudPasswordsDiaAutomationEnabled
         case inputSourceSwitchingEnabled
         case defaultEnglishInputSourceID
@@ -129,8 +113,6 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     init(
         provider: AIProvider,
-        apiBaseURL: String,
-        apiKey: String,
         openRouterBaseURL: String,
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
@@ -143,15 +125,12 @@ struct AppSettings: Codable, Equatable, Sendable {
         clipboardHistoryRetention: ClipboardHistoryRetention,
         memoryEnabled: Bool,
         memoryLimit: Int,
-        syncWithICloud: Bool,
         iCloudPasswordsDiaAutomationEnabled: Bool,
         obsidianVaultName: String = defaultObsidianVaultName,
         obsidianSubfolder: String = "",
         commands: [AICommand]
     ) {
         self.provider = provider
-        self.apiBaseURL = apiBaseURL
-        self.apiKey = apiKey
         self.openRouterBaseURL = openRouterBaseURL
         self.openRouterAPIKey = openRouterAPIKey
         self.deepSeekBaseURL = deepSeekBaseURL
@@ -169,7 +148,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         self.clipboardHistoryRetention = clipboardHistoryRetention
         self.memoryEnabled = memoryEnabled
         self.memoryLimit = Self.normalizedMemoryLimit(memoryLimit)
-        self.syncWithICloud = syncWithICloud
         self.iCloudPasswordsDiaAutomationEnabled = iCloudPasswordsDiaAutomationEnabled
         self.obsidianVaultName = obsidianVaultName
         self.obsidianSubfolder = obsidianSubfolder
@@ -182,9 +160,8 @@ struct AppSettings: Codable, Equatable, Sendable {
         defaultReasoningByModel = try container.decodeIfPresent([String: [String: ReasoningMode]].self, forKey: .defaultReasoningByModel) ?? [:]
         reasoningEffortOverrides = try container.decodeIfPresent([String: [String: [ReasoningMode]]].self, forKey: .reasoningEffortOverrides) ?? [:]
         reasoningByModel = try container.decodeIfPresent([String: ReasoningMode].self, forKey: .reasoningByModel) ?? [:]
-        provider = try container.decodeIfPresent(AIProvider.self, forKey: .provider) ?? .openAICompatible
-        apiBaseURL = try container.decodeIfPresent(String.self, forKey: .apiBaseURL) ?? Self.default.apiBaseURL
-        apiKey = try container.decodeIfPresent(String.self, forKey: .apiKey) ?? ""
+        let decodedProvider = try container.decodeIfPresent(String.self, forKey: .provider)
+        provider = decodedProvider.flatMap(AIProvider.init(rawValue:)) ?? .openRouter
         openRouterBaseURL = try container.decodeIfPresent(String.self, forKey: .openRouterBaseURL) ?? Self.default.openRouterBaseURL
         openRouterAPIKey = try container.decodeIfPresent(String.self, forKey: .openRouterAPIKey) ?? ""
         deepSeekBaseURL = try container.decodeIfPresent(String.self, forKey: .deepSeekBaseURL) ?? Self.default.deepSeekBaseURL
@@ -192,21 +169,24 @@ struct AppSettings: Codable, Equatable, Sendable {
         let decodedProviderModelCatalogs = try container.decodeIfPresent([String: [String]].self, forKey: .providerModelCatalogs)
             ?? Self.defaultProviderModelCatalogs
         providerModelCatalogs = Self.normalizedProviderModelCatalogs(decodedProviderModelCatalogs)
-        defaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? Self.default.defaultModel
+        let decodedDefaultModel = try container.decodeIfPresent(String.self, forKey: .defaultModel) ?? Self.defaultModel(for: provider)
         let decodedProviderDefaultModels = try container.decodeIfPresent([String: String].self, forKey: .providerDefaultModels) ?? [:]
         providerDefaultModels = Self.normalizedProviderDefaultModels(
             decodedProviderDefaultModels,
             selectedProvider: provider,
-            selectedDefaultModel: defaultModel,
+            selectedDefaultModel: decodedDefaultModel,
             providerModelCatalogs: providerModelCatalogs
         )
+        let catalogForProvider = Self.modelCatalog(for: provider, providerModelCatalogs: providerModelCatalogs)
+        defaultModel = catalogForProvider.contains(decodedDefaultModel)
+            ? decodedDefaultModel
+            : (providerDefaultModels[provider.rawValue] ?? Self.defaultModel(for: provider))
         clipboardHistoryShortcut = try container.decodeIfPresent(KeyboardShortcut.self, forKey: .clipboardHistoryShortcut)
         moveWindowShortcut = try container.decodeIfPresent(KeyboardShortcut.self, forKey: .moveWindowShortcut)
             ?? Self.defaultMoveWindowShortcut
         clipboardHistoryRetention = try container.decodeIfPresent(ClipboardHistoryRetention.self, forKey: .clipboardHistoryRetention) ?? .oneMonth
         memoryEnabled = try container.decodeIfPresent(Bool.self, forKey: .memoryEnabled) ?? true
         memoryLimit = Self.normalizedMemoryLimit(try container.decodeIfPresent(Int.self, forKey: .memoryLimit) ?? Self.default.memoryLimit)
-        syncWithICloud = try container.decodeIfPresent(Bool.self, forKey: .syncWithICloud) ?? true
         iCloudPasswordsDiaAutomationEnabled = try container.decodeIfPresent(
             Bool.self,
             forKey: .iCloudPasswordsDiaAutomationEnabled
@@ -326,7 +306,6 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     static var defaultProviderModelCatalogs: [String: [String]] {
         [
-            AIProvider.openAICompatible.rawValue: defaultOpenAICompatibleModelCatalog,
             AIProvider.openRouter.rawValue: defaultOpenRouterModelCatalog,
             AIProvider.deepSeek.rawValue: deepSeekModelCatalog,
         ]
@@ -357,8 +336,6 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     static func defaultModel(for provider: AIProvider) -> String {
         switch provider {
-        case .openAICompatible:
-            return openAICompatibleDefaultModel
         case .openRouter:
             return openRouterDefaultModel
         case .deepSeek:
@@ -420,7 +397,6 @@ struct AppSettings: Codable, Equatable, Sendable {
 }
 
 enum AIProvider: String, Codable, CaseIterable, Equatable, Sendable, Identifiable {
-    case openAICompatible = "OpenAI-Compatible"
     case openRouter = "OpenRouter"
     case deepSeek = "DeepSeek"
 
@@ -1157,8 +1133,6 @@ struct DiagnosticsSnapshot: Equatable, Sendable {
     var versionLogFilePath = ""
     var versionLogText = ""
     var settingsFilePath = ""
-    var iCloudSyncAvailable = false
-    var iCloudSyncDirectoryPath = ""
     var registeredHotKeys: [String] = []
     var hotKeyIssues: [String] = []
     var lastExternalApp = "Unknown"

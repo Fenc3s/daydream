@@ -13,67 +13,69 @@ struct ProviderModelTests {
             precondition(value(), message)
         }
         var legacy = AppSettings.default
-        legacy.apiBaseURL = "https://custom.example/v1"
-        legacy.apiKey = "preserved-manual-key"
-        legacy.providerModelCatalogs[AIProvider.openAICompatible.rawValue] = ["gpt-4o-mini", "custom-model"]
-        legacy.defaultModel = "gpt-4o-mini"
-        legacy.providerDefaultModels[AIProvider.openAICompatible.rawValue] = legacy.defaultModel
+        legacy.openRouterBaseURL = "https://custom.example/v1"
+        legacy.openRouterAPIKey = "preserved-manual-key"
+        legacy.providerModelCatalogs[AIProvider.openRouter.rawValue] = [AppSettings.openRouterDefaultModel, "custom-model"]
+        legacy.defaultModel = AppSettings.openRouterDefaultModel
+        legacy.providerDefaultModels[AIProvider.openRouter.rawValue] = legacy.defaultModel
         legacy.commands[0].modelOverride = legacy.defaultModel
         let encoder = JSONEncoder()
         let decoder = JSONDecoder()
         let custom = try decoder.decode(AppSettings.self, from: encoder.encode(legacy))
-        check(custom.apiBaseURL == legacy.apiBaseURL && custom.defaultModel == legacy.defaultModel, "Preserve custom endpoints")
-        check(custom.apiKey == legacy.apiKey, "Preserve credentials")
-        check(custom.modelCatalog(for: .openAICompatible).contains("custom-model"), "Preserve custom models")
+        check(custom.openRouterBaseURL == legacy.openRouterBaseURL && custom.defaultModel == legacy.defaultModel, "Preserve custom endpoints")
+        check(custom.openRouterAPIKey == legacy.openRouterAPIKey, "Preserve credentials")
+        check(custom.modelCatalog(for: .openRouter).contains("custom-model"), "Preserve custom models")
         var object = try JSONSerialization.jsonObject(with: encoder.encode(legacy)) as! [String: Any]
+        object["provider"] = "OpenAI-Compatible"
+        object["defaultModel"] = "gpt-4o-mini"
         object.removeValue(forKey: "reasoningByModel")
         object.removeValue(forKey: "reasoningEffortOverrides")
         object.removeValue(forKey: "defaultReasoningByModel")
         object.removeValue(forKey: "verifiedReasoningCapabilities")
         let old = try decoder.decode(AppSettings.self, from: JSONSerialization.data(withJSONObject: object))
+        check(old.provider == .openRouter && old.defaultModel == AppSettings.openRouterDefaultModel, "Migrate removed OpenAI-Compatible provider to OpenRouter")
         check(old.reasoningByModel.isEmpty && old.reasoningEffortOverrides.isEmpty, "Decode settings without reasoning definitions")
-        legacy.reasoningByModel = ["OpenAI-Compatible:gpt-4o-mini": .low]
+        legacy.reasoningByModel = ["OpenRouter:google/gemini-3.5-flash-lite": .low]
         let roundTrip = try decoder.decode(AppSettings.self, from: encoder.encode(legacy))
         check(roundTrip.reasoningByModel == legacy.reasoningByModel, "Persist per-model effort")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "gpt-4o-mini", capability: nil) == [.modelDefault], "No hardcoded model efforts")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "deepseek-v4-flash", capability: nil) == [.modelDefault], "No hardcoded model efforts")
         check(ReasoningMode.noEffort.rawValue == "none" && ReasoningMode.noEffort.displayName == "None", "Keep explicit None distinct from Auto and Off")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "accepts-none", capability: .init(supportedEfforts: ["high", "none", "none", "unknown"])) == [.modelDefault, .noEffort, .high], "Recognize catalog None and normalize model-specific choices")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "no-none", capability: .init(supportedEfforts: ["low"])) == [.modelDefault, .low], "Do not show None for models without support")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "unknown", capability: .init()) == [.modelDefault], "Do not invent efforts when metadata omits the list")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "accepts-none", capability: .init(supportedEfforts: ["high", "none", "none", "unknown"])) == [.modelDefault, .noEffort, .high], "Recognize catalog None and normalize model-specific choices")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "no-none", capability: .init(supportedEfforts: ["low"])) == [.modelDefault, .low], "Do not show None for models without support")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "unknown", capability: .init()) == [.modelDefault], "Do not invent efforts when metadata omits the list")
         var manual = AppSettings.default
-        manual.setManualReasoningEfforts([.high, .low, .high, .disabled, .modelDefault], for: "custom-model", provider: .openAICompatible)
-        check(manual.manualReasoningEfforts(for: "custom-model", provider: .openAICompatible) == [.low, .high], "Normalize manual efforts")
+        manual.setManualReasoningEfforts([.high, .low, .high, .disabled, .modelDefault], for: "custom-model", provider: .openRouter)
+        check(manual.manualReasoningEfforts(for: "custom-model", provider: .openRouter) == [.low, .high], "Normalize manual efforts")
         manual.setManualReasoningEfforts([.max], for: "custom-model", provider: .deepSeek)
         let savedManual = try decoder.decode(AppSettings.self, from: encoder.encode(manual))
         check(savedManual.reasoningEffortOverrides == manual.reasoningEffortOverrides, "Persist definitions across settings reload")
         var noneSettings = manual
-        noneSettings.setManualReasoningEfforts([.noEffort, .low], for: "none-model", provider: .openAICompatible)
-        noneSettings.setDefaultReasoningMode(.noEffort, for: "none-model", provider: .openAICompatible)
+        noneSettings.setManualReasoningEfforts([.noEffort, .low], for: "none-model", provider: .openRouter)
+        noneSettings.setDefaultReasoningMode(.noEffort, for: "none-model", provider: .openRouter)
         let restoredNone = try decoder.decode(AppSettings.self, from: encoder.encode(noneSettings))
-        check(restoredNone.manualReasoningEfforts(for: "none-model", provider: .openAICompatible) == [.noEffort, .low], "Persist manual None per model")
-        check(restoredNone.defaultReasoningMode(for: "none-model", provider: .openAICompatible, availableModes: [.modelDefault, .noEffort, .low]) == .noEffort, "Remember None as a model default")
-        check(savedManual.manualReasoningEfforts(for: "custom-model", provider: .openRouter) == nil, "Keep provider definitions separate")
-        check(savedManual.manualReasoningEfforts(for: "other-model", provider: .openAICompatible) == nil, "Keep model definitions separate")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: savedManual.manualReasoningEfforts(for: "custom-model", provider: .openAICompatible)) == [.modelDefault, .low, .high], "Manual efforts override refreshed catalog metadata")
-        manual.setManualReasoningEfforts([], for: "custom-model", provider: .openAICompatible)
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: manual.manualReasoningEfforts(for: "custom-model", provider: .openAICompatible)) == [.modelDefault], "Empty manual definition means Auto only")
-        manual.setManualReasoningEfforts(nil, for: "custom-model", provider: .openAICompatible)
-        check(manual.manualReasoningEfforts(for: "custom-model", provider: .openAICompatible) == nil, "Restore automatic discovery")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: manual.manualReasoningEfforts(for: "custom-model", provider: .openAICompatible)) == [.modelDefault, .max], "Use catalog after removing override")
+        check(restoredNone.manualReasoningEfforts(for: "none-model", provider: .openRouter) == [.noEffort, .low], "Persist manual None per model")
+        check(restoredNone.defaultReasoningMode(for: "none-model", provider: .openRouter, availableModes: [.modelDefault, .noEffort, .low]) == .noEffort, "Remember None as a model default")
+        check(savedManual.manualReasoningEfforts(for: "other-model", provider: .openRouter) == nil, "Keep model definitions separate")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: savedManual.manualReasoningEfforts(for: "custom-model", provider: .openRouter)) == [.modelDefault, .low, .high], "Manual efforts override refreshed catalog metadata")
+        manual.setManualReasoningEfforts([], for: "custom-model", provider: .openRouter)
+        check(ModelReasoning.modes(provider: .deepSeek, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: manual.manualReasoningEfforts(for: "custom-model", provider: .openRouter)) == [.modelDefault], "Empty manual definition means Auto only")
+        manual.setManualReasoningEfforts(nil, for: "custom-model", provider: .openRouter)
+        check(manual.manualReasoningEfforts(for: "custom-model", provider: .openRouter) == nil, "Restore automatic discovery")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "custom-model", capability: .init(supportedEfforts: ["max"]), manualEfforts: manual.manualReasoningEfforts(for: "custom-model", provider: .openRouter)) == [.modelDefault, .max], "Use catalog after removing override")
         check(manual.manualReasoningEfforts(for: "custom-model", provider: .deepSeek) == [.max], "Reset preserves other providers")
-        check(ModelReasoning.modes(provider: .openAICompatible, model: "unknown", capability: nil) == [.modelDefault], "Unknown models use Auto")
+        check(ModelReasoning.modes(provider: .deepSeek, model: "unknown", capability: nil) == [.modelDefault], "Unknown models use Auto")
         check(ModelReasoning.modes(provider: .openRouter, model: "test", capability: .init(mandatory: true, supportedEfforts: ["low", "max"])) == [.modelDefault, .low, .max], "Mandatory reasoning cannot be disabled")
         check(ModelReasoning.modes(provider: .deepSeek, model: "test", capability: .init(supportedEfforts: ["low", "max"])) == [.modelDefault, .low, .max], "Use provider catalog levels")
         var defaults = AppSettings.default
-        defaults.setDefaultReasoningMode(.low, for: "model-a", provider: .openAICompatible)
-        defaults.setDefaultReasoningMode(.high, for: "model-b", provider: .openAICompatible)
+        defaults.setDefaultReasoningMode(.low, for: "model-a", provider: .openRouter)
+        defaults.setDefaultReasoningMode(.high, for: "model-b", provider: .openRouter)
         defaults.setDefaultReasoningMode(.max, for: "model-a", provider: .deepSeek)
         let restoredDefaults = try decoder.decode(AppSettings.self, from: encoder.encode(defaults))
-        check(restoredDefaults.defaultReasoningMode(for: "model-a", provider: .openAICompatible, availableModes: [.modelDefault, .low]) == .low, "Restore model A default")
-        check(restoredDefaults.defaultReasoningMode(for: "model-b", provider: .openAICompatible, availableModes: [.modelDefault, .high]) == .high, "Switching models restores separate defaults")
+        check(restoredDefaults.defaultReasoningMode(for: "model-a", provider: .openRouter, availableModes: [.modelDefault, .low]) == .low, "Restore model A default")
+        check(restoredDefaults.defaultReasoningMode(for: "model-b", provider: .openRouter, availableModes: [.modelDefault, .high]) == .high, "Switching models restores separate defaults")
         check(restoredDefaults.defaultReasoningMode(for: "model-a", provider: .deepSeek, availableModes: [.modelDefault, .max]) == .max, "Defaults are isolated by provider")
-        check(restoredDefaults.defaultReasoningMode(for: "model-a", provider: .openAICompatible, availableModes: [.modelDefault]) == .modelDefault, "Removed effort falls back to Auto")
-        check(restoredDefaults.defaultReasoningMode(for: "unknown", provider: .openAICompatible, availableModes: [.modelDefault, .low]) == .modelDefault, "Unconfigured model defaults to Auto")
+        check(restoredDefaults.defaultReasoningMode(for: "model-a", provider: .openRouter, availableModes: [.modelDefault]) == .modelDefault, "Removed effort falls back to Auto")
+        check(restoredDefaults.defaultReasoningMode(for: "unknown", provider: .openRouter, availableModes: [.modelDefault, .low]) == .modelDefault, "Unconfigured model defaults to Auto")
         check(AICommand(commandID: "new", title: "New", promptTemplate: "{{text}}").useDefaultReasoning, "New commands inherit model reasoning")
         var oldCommand = try JSONSerialization.jsonObject(with: encoder.encode(defaults.commands[0])) as! [String: Any]
         oldCommand.removeValue(forKey: "useDefaultReasoning")
@@ -102,7 +104,7 @@ struct ProviderModelTests {
         var blockedCache = cached
         blockedCache.status = "region_blocked"
         check(!blockedCache.isFresh(for: testURL, now: Date().addingTimeInterval(16 * 60)), "Retry unavailable checks after fifteen minutes")
-        defaults.verifiedReasoningCapabilities = [AIProvider.openAICompatible.rawValue: ["cached-model": cached]]
+        defaults.verifiedReasoningCapabilities = [AIProvider.openRouter.rawValue: ["cached-model": cached]]
         let cachedRoundTrip = try decoder.decode(AppSettings.self, from: encoder.encode(defaults))
         check(cachedRoundTrip.verifiedReasoningCapabilities == defaults.verifiedReasoningCapabilities, "Persist verified capability cache")
         let cacheDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -115,7 +117,7 @@ struct ProviderModelTests {
             check(discovered.status == "verified" && discovered.efforts == [.low, .high], "Discover supported efforts with streaming positive and negative controls")
             let supportsNone = await ReasoningCapabilityDiscovery.discover(model: "discovery-none", baseURL: testURL, apiKey: "")
             check(supportsNone.efforts == [.noEffort, .low, .high], "Fetch probes None only as a supported explicit effort")
-            check(ModelReasoning.modes(provider: .openAICompatible, model: "discovery-none", capability: .init(supportedEfforts: supportsNone.efforts.map(\.rawValue))) == [.modelDefault, .noEffort, .low, .high], "Settings and menu share the verified per-model choices")
+            check(ModelReasoning.modes(provider: .deepSeek, model: "discovery-none", capability: .init(supportedEfforts: supportsNone.efforts.map(\.rawValue))) == [.modelDefault, .noEffort, .low, .high], "Settings and menu share the verified per-model choices")
             let ignored = await ReasoningCapabilityDiscovery.discover(model: "discovery-ignored", baseURL: testURL, apiKey: "")
             check(ignored.status == "parameter_not_validated" && ignored.efforts.isEmpty, "Do not mistake silently ignored fields for support")
             let blocked = await ReasoningCapabilityDiscovery.discover(model: "discovery-blocked", baseURL: testURL, apiKey: "")
@@ -126,12 +128,10 @@ struct ProviderModelTests {
             for provider in AIProvider.allCases {
                 for mode in [ReasoningMode.modelDefault, .noEffort, .low, .high] {
                     _ = try await client.generateText(provider: provider,
-                        openAICompatibleBaseURL: testURL, openAICompatibleAPIKey: "",
                         openRouterBaseURL: testURL, openRouterAPIKey: "",
                         deepSeekBaseURL: testURL, deepSeekAPIKey: "",
                         model: provider.rawValue, messages: [.init(role: "user", content: mode.rawValue)], reasoningMode: mode)
                     for try await _ in client.streamText(provider: provider,
-                        openAICompatibleBaseURL: testURL, openAICompatibleAPIKey: "",
                         openRouterBaseURL: testURL, openRouterAPIKey: "",
                         deepSeekBaseURL: testURL, deepSeekAPIKey: "",
                         model: provider.rawValue, messages: [.init(role: "user", content: mode.rawValue)], reasoningMode: mode) {}
@@ -143,53 +143,34 @@ struct ProviderModelTests {
         defer { try? FileManager.default.removeItem(at: settingsDirectory) }
         let preferenceStore = SettingsStore(directory: settingsDirectory)
         var modelSettings = AppSettings.default
-        modelSettings.providerModelCatalogs[AIProvider.openAICompatible.rawValue] = ["model-a", "model-b"]
-        modelSettings.setDefaultModel("model-a", for: .openAICompatible)
-        modelSettings.setDefaultReasoningMode(.low, for: "model-a", provider: .openAICompatible)
+        modelSettings.providerModelCatalogs[AIProvider.openRouter.rawValue] = ["model-a", "model-b"]
+        modelSettings.setDefaultModel("model-a", for: .openRouter)
+        modelSettings.setDefaultReasoningMode(.low, for: "model-a", provider: .openRouter)
         preferenceStore.save(modelSettings)
-        modelSettings.setDefaultModel("model-b", for: .openAICompatible)
-        modelSettings.setDefaultReasoningMode(.high, for: "model-b", provider: .openAICompatible)
+        modelSettings.setDefaultModel("model-b", for: .openRouter)
+        modelSettings.setDefaultReasoningMode(.high, for: "model-b", provider: .openRouter)
         preferenceStore.save(modelSettings)
-        modelSettings.setDefaultModel("model-a", for: .openAICompatible)
-        check(modelSettings.defaultReasoningMode(for: modelSettings.defaultModel, provider: .openAICompatible, availableModes: [.modelDefault, .low, .high]) == .low, "Switch A to B and back restores A's effort")
+        modelSettings.setDefaultModel("model-a", for: .openRouter)
+        check(modelSettings.defaultReasoningMode(for: modelSettings.defaultModel, provider: .openRouter, availableModes: [.modelDefault, .low, .high]) == .low, "Switch A to B and back restores A's effort")
         preferenceStore.save(modelSettings)
         let restartedStore = SettingsStore(directory: settingsDirectory)
         var restartedSettings = restartedStore.load()
-        check(restartedSettings.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-a"] == .low, "Remember A after application restart")
-        check(restartedSettings.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-b"] == .high, "Remember B independently after application restart")
-        let syncedSettingsURL = settingsDirectory.appendingPathComponent("cloud/settings.json")
-        try FileManager.default.createDirectory(at: syncedSettingsURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        var oldSyncedObject = try JSONSerialization.jsonObject(with: encoder.encode(modelSettings)) as! [String: Any]
-        oldSyncedObject.removeValue(forKey: "defaultReasoningByModel")
-        try JSONSerialization.data(withJSONObject: oldSyncedObject).write(to: syncedSettingsURL)
-        restartedStore.useSyncedFileURL(syncedSettingsURL)
-        restartedSettings = restartedStore.load()
-        check(restartedSettings.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-a"] == .low, "Older cloud settings cannot erase A's effort")
-        check(restartedSettings.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-b"] == .high, "Older cloud settings cannot erase B's effort")
-        var staleSynced = restartedSettings
-        staleSynced.setDefaultReasoningMode(.modelDefault, for: "model-a", provider: .openAICompatible)
-        try encoder.encode(staleSynced).write(to: syncedSettingsURL)
-        restartedSettings = restartedStore.load()
-        check(restartedSettings.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-a"] == .low, "A stale cloud Auto value cannot replace an explicit local choice")
-        restartedSettings.setDefaultReasoningMode(.modelDefault, for: "model-a", provider: .openAICompatible)
+        check(restartedSettings.defaultReasoningByModel[AIProvider.openRouter.rawValue]?["model-a"] == .low, "Remember A after application restart")
+        check(restartedSettings.defaultReasoningByModel[AIProvider.openRouter.rawValue]?["model-b"] == .high, "Remember B independently after application restart")
+        restartedSettings.setDefaultReasoningMode(.modelDefault, for: "model-a", provider: .openRouter)
         restartedStore.save(restartedSettings)
         let explicitlyReset = restartedStore.load()
-        check(explicitlyReset.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-a"] == .modelDefault, "An explicit local Auto selection replaces the remembered Low")
-        check(explicitlyReset.defaultReasoningByModel[AIProvider.openAICompatible.rawValue]?["model-b"] == .high, "Resetting A does not change B")
-        check(explicitlyReset.defaultReasoningMode(for: "model-b", provider: .openAICompatible, availableModes: [.modelDefault]) == .modelDefault, "Temporarily unavailable efforts use Auto")
-        check(explicitlyReset.defaultReasoningMode(for: "model-b", provider: .openAICompatible, availableModes: [.modelDefault, .high]) == .high, "Restoring capabilities restores the remembered effort")
+        check(explicitlyReset.defaultReasoningByModel[AIProvider.openRouter.rawValue]?["model-a"] == .modelDefault, "An explicit local Auto selection replaces the remembered Low")
+        check(explicitlyReset.defaultReasoningByModel[AIProvider.openRouter.rawValue]?["model-b"] == .high, "Resetting A does not change B")
+        check(explicitlyReset.defaultReasoningMode(for: "model-b", provider: .openRouter, availableModes: [.modelDefault]) == .modelDefault, "Temporarily unavailable efforts use Auto")
+        check(explicitlyReset.defaultReasoningMode(for: "model-b", provider: .openRouter, availableModes: [.modelDefault, .high]) == .high, "Restoring capabilities restores the remembered effort")
         var inheritedCommands = restartedStore.load()
         for index in inheritedCommands.commands.indices { inheritedCommands.commands[index].useDefaultReasoning = false }
         check(restartedStore.migrateCommandReasoningInheritance(in: &inheritedCommands), "Enable inheritance for existing commands on first migration")
         check(inheritedCommands.commands.allSatisfy(\.useDefaultReasoning), "Every existing command inherits the menu effort")
         restartedStore.save(inheritedCommands)
-        var staleCommands = inheritedCommands
-        for index in staleCommands.commands.indices { staleCommands.commands[index].useDefaultReasoning = false }
-        try encoder.encode(staleCommands).write(to: syncedSettingsURL)
-        var inheritedReload = restartedStore.load()
-        check(inheritedReload.commands.allSatisfy(\.useDefaultReasoning), "Stale synced command flags cannot undo the inheritance migration")
-        inheritedReload.commands[0].useDefaultReasoning = false
-        restartedStore.save(inheritedReload)
+        inheritedCommands.commands[0].useDefaultReasoning = false
+        restartedStore.save(inheritedCommands)
         var explicitOverride = restartedStore.load()
         check(!restartedStore.migrateCommandReasoningInheritance(in: &explicitOverride), "Inheritance migration runs only once")
         check(!explicitOverride.commands[0].useDefaultReasoning && explicitOverride.commands.dropFirst().allSatisfy(\.useDefaultReasoning), "A later explicit command override stays independent")
@@ -198,12 +179,6 @@ struct ProviderModelTests {
         check(!pendingPopup.canApply, "A processing popup must not replace a selection with empty text")
         pendingPopup.result.output = "Result"
         check(pendingPopup.canApply, "Apply becomes available once actual output exists")
-
-
-        let sync = ICloudSyncService()
-        sync.refreshAvailability()
-        sync.startObserving { _ in }
-        sync.stopObserving()
 
         // Verify KeychainStore round-trip, plaintext JSON migration, and secret scrubbing.
         let keychainService = "Homer.daydream.tests.\(UUID().uuidString)"
@@ -222,7 +197,6 @@ struct ProviderModelTests {
         try JSONSerialization.data(withJSONObject: rawLegacySettings).write(to: secretSettingsURL)
         let keychainSettingsStore = SettingsStore(directory: secretDir, credentialStore: testKeychain)
         var migratedSecrets = keychainSettingsStore.load()
-        check(migratedSecrets.apiKey == "test-api-secret", "Migrate manual API key to Keychain")
         check(migratedSecrets.openRouterAPIKey == "test-or-secret", "Migrate OpenRouter API key to Keychain")
         check(migratedSecrets.deepSeekAPIKey == "test-ds-secret", "Migrate DeepSeek API key to Keychain")
         check(testKeychain.string(for: .openRouterAPIKey) == "test-or-secret", "Persist migrated secret in macOS Keychain")
@@ -421,17 +395,15 @@ struct ProviderModelTests {
             "Normalize app input source rules by trimming, dropping invalid/self entries, falling back appName, and deduplicating in order"
         )
 
-        // Verify SettingsStore local-vs-iCloud sync isolation and preservation of uninstalled third-party IME rules.
+        // Verify SettingsStore local persistence and preservation of uninstalled third-party IME rules.
         let inputStoreDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer { try? FileManager.default.removeItem(at: inputStoreDir) }
-        let syncedInputURL = inputStoreDir.appendingPathComponent("cloud/settings.json")
-        try FileManager.default.createDirectory(at: syncedInputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-        let syncedInputStore = SettingsStore(directory: inputStoreDir)
-        syncedInputStore.useSyncedFileURL(syncedInputURL)
-        var syncedInputSettings = AppSettings.default
-        syncedInputSettings.inputSourceSwitchingEnabled = false
-        syncedInputSettings.defaultEnglishInputSourceID = "com.apple.keylayout.US"
-        syncedInputSettings.appInputSourceRules = [
+        let localInputSettingsURL = inputStoreDir.appendingPathComponent("settings.json")
+        let localInputStore = SettingsStore(directory: inputStoreDir)
+        var localInputSettings = AppSettings.default
+        localInputSettings.inputSourceSwitchingEnabled = false
+        localInputSettings.defaultEnglishInputSourceID = "com.apple.keylayout.US"
+        localInputSettings.appInputSourceRules = [
             AppInputSourceRule(
                 bundleIdentifier: "com.tencent.xinWeChat",
                 appName: "WeChat",
@@ -445,32 +417,27 @@ struct ProviderModelTests {
                 isEnabled: true
             ),
         ]
-        syncedInputStore.save(syncedInputSettings)
-        let rawSyncedInputJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: syncedInputURL)) as! [String: Any]
+        localInputStore.save(localInputSettings)
+        let rawLocalInputJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: localInputSettingsURL)) as! [String: Any]
         check(
-            rawSyncedInputJSON["defaultEnglishInputSourceID"] as? String == "com.apple.keylayout.US" &&
-            rawSyncedInputJSON["appInputSourceRules"] != nil,
-            "Synced cloud settings.json persists defaultEnglishInputSourceID and appInputSourceRules"
-        )
-        check(
-            rawSyncedInputJSON["inputSourceSwitchingEnabled"] == nil,
-            "Synced cloud settings.json scrubs machine-local inputSourceSwitchingEnabled"
+            rawLocalInputJSON["defaultEnglishInputSourceID"] as? String == "com.apple.keylayout.US" &&
+            rawLocalInputJSON["appInputSourceRules"] != nil,
+            "Local settings.json persists defaultEnglishInputSourceID and appInputSourceRules"
         )
         let reloadedInputStore = SettingsStore(directory: inputStoreDir)
-        reloadedInputStore.useSyncedFileURL(syncedInputURL)
         let reloadedInputSettings = reloadedInputStore.load()
         check(
             reloadedInputSettings.inputSourceSwitchingEnabled == false,
             "Reloading SettingsStore preserves local inputSourceSwitchingEnabled == false from local-preferences.json"
         )
         reloadedInputStore.save(reloadedInputSettings)
-        let roundTrippedSyncedSettings = reloadedInputStore.load()
+        let roundTrippedLocalSettings = reloadedInputStore.load()
         check(
-            roundTrippedSyncedSettings.appInputSourceRules.contains(where: {
+            roundTrippedLocalSettings.appInputSourceRules.contains(where: {
                 $0.bundleIdentifier == "com.tencent.xinWeChat" &&
                 $0.inputSourceID == "com.apple.inputmethod.SCIM.ITABC"
             }) &&
-            roundTrippedSyncedSettings.appInputSourceRules.contains(where: {
+            roundTrippedLocalSettings.appInputSourceRules.contains(where: {
                 $0.bundleIdentifier == "md.obsidian" &&
                 $0.inputSourceID == "im.rime.inputmethod.Squirrel"
             }),

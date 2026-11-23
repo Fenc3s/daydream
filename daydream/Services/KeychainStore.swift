@@ -2,14 +2,11 @@ import Foundation
 import Security
 
 enum CredentialAccount: String, CaseIterable, Sendable {
-    case openAICompatibleAPIKey = "apiKey"
     case openRouterAPIKey = "openRouterAPIKey"
     case deepSeekAPIKey = "deepSeekAPIKey"
 
     init(provider: AIProvider) {
         switch provider {
-        case .openAICompatible:
-            self = .openAICompatibleAPIKey
         case .openRouter:
             self = .openRouterAPIKey
         case .deepSeek:

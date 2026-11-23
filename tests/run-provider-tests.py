@@ -96,7 +96,6 @@ enum ICloudPasswordsAutomationStatus {
         "daydream/Services/AIClient.swift",
         "daydream/Services/ProviderModelCatalog.swift",
         "daydream/Services/ReasoningCapabilityDiscovery.swift",
-        "daydream/Services/ICloudSyncService.swift",
         "daydream/Services/InputSourceSwitchingService.swift",
         "daydream/Services/WindowMoverService.swift",
         "daydream/Services/SettingsStore.swift",
@@ -107,5 +106,5 @@ enum ICloudPasswordsAutomationStatus {
     subprocess.run([str(folder / "tests"), "--requests"], env=env, check=True)
 server.shutdown()
 assert not errors, "\n".join(errors)
-assert len(requests) == 24, requests
-print("24 production HTTP payload checks passed (3 providers × 4 efforts × streaming/non-streaming)")
+assert len(requests) == 16, requests
+print("16 production HTTP payload checks passed (2 providers × 4 efforts × streaming/non-streaming)")

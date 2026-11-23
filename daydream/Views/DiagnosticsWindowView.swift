@@ -25,10 +25,6 @@ struct DiagnosticsWindowView: View {
                         statusRow(label: "Input Source Switching", value: appModel.diagnostics.inputSourceSwitchingStatus)
                         statusRow(label: "Last Target App", value: appModel.diagnostics.lastExternalApp)
                         statusRow(label: "Settings File", value: appModel.diagnostics.settingsFilePath)
-                        statusRow(label: "iCloud Sync", value: appModel.diagnostics.iCloudSyncAvailable ? "Available" : "Unavailable")
-                        if !appModel.diagnostics.iCloudSyncDirectoryPath.isEmpty {
-                            statusRow(label: "iCloud Directory", value: appModel.diagnostics.iCloudSyncDirectoryPath)
-                        }
                         statusRow(label: "Log File", value: appModel.diagnostics.logFilePath)
                         statusRow(label: "Version Log", value: appModel.diagnostics.versionLogFilePath)
                     }

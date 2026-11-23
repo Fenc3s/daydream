@@ -225,40 +225,6 @@ private struct GeneralSettingsView: View {
                         Divider()
 
                         switch appModel.settings.provider {
-                        case .openAICompatible:
-                            settingsRow("API Base URL") {
-                                TextField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.apiBaseURL },
-                                        set: {
-                                            appModel.settings.apiBaseURL = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-
-                            Divider()
-
-                            settingsRow("API Key") {
-                                SecureField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.apiKey },
-                                        set: {
-                                            appModel.settings.apiKey = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-                            Text("Configure any OpenAI-compatible API endpoint (such as OpenAI, Ollama, or a custom proxy) and its API key.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
                         case .openRouter:
                             settingsRow("OpenRouter URL") {
                                 TextField(
@@ -455,35 +421,6 @@ private struct GeneralSettingsView: View {
                     }
                 }
 
-                settingsSection(title: "Sync") {
-                    settingsGroup {
-                        settingsRow("Sync with iCloud") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Toggle(
-                                    "",
-                                    isOn: Binding(
-                                        get: { appModel.settings.syncWithICloud },
-                                        set: { appModel.setSyncWithICloud($0) }
-                                    )
-                                )
-                                .labelsHidden()
-
-                                Text(syncStatusText)
-                                    .font(.caption)
-                                    .foregroundStyle(appModel.diagnostics.iCloudSyncAvailable ? Color.secondary : Color.orange)
-
-                                if !appModel.diagnostics.iCloudSyncDirectoryPath.isEmpty {
-                                    Text(appModel.diagnostics.iCloudSyncDirectoryPath)
-                                        .font(.caption.monospaced())
-                                        .foregroundStyle(.secondary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                }
-                            }
-                        }
-                    }
-                }
-
             }
             .padding(.horizontal, 28)
             .padding(.top, 28)
@@ -495,15 +432,6 @@ private struct GeneralSettingsView: View {
                 appModel.refreshProviderModels(appModel.settings.provider)
             }
         }
-    }
-
-    private var syncStatusText: String {
-        if appModel.settings.syncWithICloud {
-            return appModel.diagnostics.iCloudSyncAvailable
-                ? "Commands and settings sync through iCloud Drive."
-                : "iCloud Drive is unavailable; daydream is using local storage."
-        }
-        return "Commands and settings are stored locally."
     }
 
     private var availableModels: [String] {
@@ -642,20 +570,10 @@ private struct ProviderModelCatalogEditor: View {
     private func reasoningSummary(for model: String) -> String {
         let modes = appModel.availableReasoningModes(for: model, provider: provider).map(\.displayName).joined(separator: ", ")
         let isManual = appModel.settings.manualReasoningEfforts(for: model, provider: provider) != nil
-        let entry = appModel.verifiedReasoningCapability(for: model, provider: provider)
         let source: String
         if isManual { source = "Manual" }
         else if appModel.modelCapabilities[provider.rawValue]?[model] != nil { source = "Provider catalog" }
-        else if let entry, entry.isFresh(for: appModel.settings.apiBaseURL) {
-            switch entry.status {
-            case "verified": source = "Verified check"
-            case "region_blocked": source = "Region restricted"
-            case "route_unavailable": source = "Route unavailable"
-            case "auto_only": source = "Auto only (verified)"
-            case "streaming_unverified": source = "Text stream unverified"
-            default: source = "Effort not validated"
-            }
-        } else { source = "No capability data" }
+        else { source = "No capability data" }
         return "Reasoning: \(modes) · \(source)"
     }
 
@@ -666,8 +584,6 @@ private struct ProviderModelCatalogEditor: View {
 
     private var modelPlaceholder: String {
         switch provider {
-        case .openAICompatible:
-            return "provider-model-id"
         case .openRouter:
             return "vendor/model-id"
         case .deepSeek:

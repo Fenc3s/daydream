@@ -2,14 +2,13 @@ import Foundation
 
 final class SettingsStore {
     private struct LocalPreferences: Codable {
-        var syncWithICloud: Bool
         var iCloudPasswordsDiaAutomationEnabled: Bool?
         var inputSourceSwitchingEnabled: Bool?
         var commandReasoningInheritanceMigrated: Bool?
     }
 
     private static let secretJSONKeys: Set<String> = [
-        AppSettings.CodingKeys.apiKey.rawValue,
+        "apiKey",
         AppSettings.CodingKeys.openRouterAPIKey.rawValue,
         AppSettings.CodingKeys.deepSeekAPIKey.rawValue,
         "tavilyAPIKey",
@@ -23,11 +22,10 @@ final class SettingsStore {
     private let localModelReasoningFileURL: URL
     private let localCommandReasoningFileURL: URL
     private let credentialStore: any CredentialStoring
-    private var syncedFileURL: URL?
     private var cachedCredentials: [CredentialAccount: String] = [:]
 
     var fileURL: URL {
-        syncedFileURL ?? localFileURL
+        localFileURL
     }
 
     init(
@@ -54,22 +52,12 @@ final class SettingsStore {
         }
     }
 
-    func useSyncedFileURL(_ url: URL?) {
-        syncedFileURL = url
-    }
-
-    func prefersICloudSync() -> Bool {
-        loadLocalPreferences()?.syncWithICloud ?? true
-    }
-
     func ensureCredentialsLoaded(for provider: AIProvider, in settings: inout AppSettings) {
         let account = CredentialAccount(provider: provider)
         let hadCachedValue = cachedCredentials[account] != nil
         let stored = loadCredential(for: account)
         guard !hadCachedValue else { return }
         switch provider {
-        case .openAICompatible:
-            if settings.apiKey.isEmpty { settings.apiKey = stored }
         case .openRouter:
             if settings.openRouterAPIKey.isEmpty { settings.openRouterAPIKey = stored }
         case .deepSeek:
@@ -79,28 +67,18 @@ final class SettingsStore {
 
     func load(activeProviderOnly: Bool = false) -> AppSettings {
         let targetURL = fileURL
-        let isCoordinated = syncedFileURL != nil
 
         guard fileManager.fileExists(atPath: targetURL.path) else {
             var settings = AppSettings.default
             applyLocalPreferences(to: &settings)
-            if syncedFileURL != nil, let localProvider = loadLocalProvider() {
-                settings.provider = localProvider
-                settings.defaultModel = settings.defaultModel(for: localProvider)
-            }
             restoreCredentials(into: &settings, activeProviderOnly: activeProviderOnly)
             save(settings)
             return settings
         }
 
-        guard let data = readData(from: targetURL, coordinated: isCoordinated) else {
-            // Transient read failure (e.g. pending iCloud download): never clobber the file on disk.
+        guard let data = readData(from: targetURL) else {
             var fallback = AppSettings.default
             applyLocalPreferences(to: &fallback)
-            if syncedFileURL != nil, let localProvider = loadLocalProvider() {
-                fallback.provider = localProvider
-                fallback.defaultModel = fallback.defaultModel(for: localProvider)
-            }
             restoreCredentials(into: &fallback, activeProviderOnly: activeProviderOnly)
             return fallback
         }
@@ -108,16 +86,12 @@ final class SettingsStore {
         do {
             var settings = try JSONDecoder().decode(AppSettings.self, from: data)
             applyLocalPreferences(to: &settings)
-            if syncedFileURL != nil, let localProvider = loadLocalProvider() {
-                settings.provider = localProvider
-                settings.defaultModel = settings.defaultModel(for: localProvider)
-            }
             let needsSecretScrub = migrateOrRestoreCredentials(
                 in: &settings,
                 rawData: data,
                 activeProviderOnly: activeProviderOnly
             )
-            if syncedFileURL != nil || needsSecretScrub {
+            if needsSecretScrub {
                 save(settings, existingFileData: data)
             }
             return settings
@@ -125,10 +99,6 @@ final class SettingsStore {
             backupCorruptedSettingsData(data)
             var fallback = AppSettings.default
             applyLocalPreferences(to: &fallback)
-            if syncedFileURL != nil, let localProvider = loadLocalProvider() {
-                fallback.provider = localProvider
-                fallback.defaultModel = fallback.defaultModel(for: localProvider)
-            }
             restoreCredentials(into: &fallback, activeProviderOnly: activeProviderOnly)
             return fallback
         }
@@ -136,7 +106,6 @@ final class SettingsStore {
 
     func save(_ settings: AppSettings, existingFileData: Data? = nil) {
         var settings = settings
-        // Preserve remembered models when an older synced file omits their keys.
         for (provider, choices) in loadModelReasoningPreferences() {
             for (model, mode) in choices where settings.defaultReasoningByModel[provider]?[model] == nil {
                 settings.defaultReasoningByModel[provider, default: [:]][model] = mode
@@ -147,7 +116,6 @@ final class SettingsStore {
         saveCommandReasoningPreferences(settings.commands)
         saveLocalProvider(settings.provider)
         saveLocalPreferences(
-            syncWithICloud: settings.syncWithICloud,
             iCloudPasswordsDiaAutomationEnabled: settings.iCloudPasswordsDiaAutomationEnabled,
             inputSourceSwitchingEnabled: settings.inputSourceSwitchingEnabled
         )
@@ -155,15 +123,14 @@ final class SettingsStore {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(settings) else { return }
-        let outputData = sanitizedSettingsData(from: data, isSyncedTarget: syncedFileURL != nil)
-        writeIfChanged(outputData, to: fileURL, coordinated: syncedFileURL != nil, existingData: existingFileData)
+        let outputData = sanitizedSettingsData(from: data)
+        writeIfChanged(outputData, to: fileURL, existingData: existingFileData)
     }
 
     func migrateCommandReasoningInheritance(in settings: inout AppSettings) -> Bool {
         guard loadLocalPreferences()?.commandReasoningInheritanceMigrated != true else { return false }
         for index in settings.commands.indices { settings.commands[index].useDefaultReasoning = true }
         saveLocalPreferences(
-            syncWithICloud: settings.syncWithICloud,
             iCloudPasswordsDiaAutomationEnabled: settings.iCloudPasswordsDiaAutomationEnabled,
             inputSourceSwitchingEnabled: settings.inputSourceSwitchingEnabled,
             commandReasoningInheritanceMigrated: true
@@ -236,24 +203,20 @@ final class SettingsStore {
             }
         }
         saveCommandReasoningPreferences(settings.commands)
-        settings.syncWithICloud = localPreferences?.syncWithICloud ?? true
         settings.iCloudPasswordsDiaAutomationEnabled = localPreferences?.iCloudPasswordsDiaAutomationEnabled ?? true
         settings.inputSourceSwitchingEnabled = localPreferences?.inputSourceSwitchingEnabled ?? settings.inputSourceSwitchingEnabled
         saveLocalPreferences(
-            syncWithICloud: settings.syncWithICloud,
             iCloudPasswordsDiaAutomationEnabled: settings.iCloudPasswordsDiaAutomationEnabled,
             inputSourceSwitchingEnabled: settings.inputSourceSwitchingEnabled
         )
     }
 
     private func saveLocalPreferences(
-        syncWithICloud: Bool,
         iCloudPasswordsDiaAutomationEnabled: Bool,
         inputSourceSwitchingEnabled: Bool,
         commandReasoningInheritanceMigrated: Bool? = nil
     ) {
         let preferences = LocalPreferences(
-            syncWithICloud: syncWithICloud,
             iCloudPasswordsDiaAutomationEnabled: iCloudPasswordsDiaAutomationEnabled,
             inputSourceSwitchingEnabled: inputSourceSwitchingEnabled,
             commandReasoningInheritanceMigrated: commandReasoningInheritanceMigrated
@@ -284,7 +247,6 @@ final class SettingsStore {
     }
 
     private func persistCredentials(from settings: AppSettings) {
-        persistCredential(settings.apiKey, for: .openAICompatibleAPIKey)
         persistCredential(settings.openRouterAPIKey, for: .openRouterAPIKey)
         persistCredential(settings.deepSeekAPIKey, for: .deepSeekAPIKey)
     }
@@ -298,9 +260,6 @@ final class SettingsStore {
 
     private func restoreCredentials(into settings: inout AppSettings, activeProviderOnly: Bool = false) {
         let provider = settings.provider
-        if shouldLoadCredential(.openAICompatibleAPIKey, for: provider, activeProviderOnly: activeProviderOnly) {
-            settings.apiKey = loadCredential(for: .openAICompatibleAPIKey)
-        }
         if shouldLoadCredential(.openRouterAPIKey, for: provider, activeProviderOnly: activeProviderOnly) {
             settings.openRouterAPIKey = loadCredential(for: .openRouterAPIKey)
         }
@@ -337,13 +296,12 @@ final class SettingsStore {
             return stored
         }
 
-        settings.apiKey = resolve(settings.apiKey, account: .openAICompatibleAPIKey)
         settings.openRouterAPIKey = resolve(settings.openRouterAPIKey, account: .openRouterAPIKey)
         settings.deepSeekAPIKey = resolve(settings.deepSeekAPIKey, account: .deepSeekAPIKey)
         return hasSecretKeysOnDisk
     }
 
-    private func sanitizedSettingsData(from data: Data, isSyncedTarget: Bool) -> Data {
+    private func sanitizedSettingsData(from data: Data) -> Data {
         guard var object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
             return data
         }
@@ -352,13 +310,6 @@ final class SettingsStore {
             object.removeValue(forKey: secretKey)
         }
 
-        if isSyncedTarget {
-            object.removeValue(forKey: AppSettings.CodingKeys.provider.rawValue)
-            object.removeValue(forKey: AppSettings.CodingKeys.defaultModel.rawValue)
-            object.removeValue(forKey: AppSettings.CodingKeys.syncWithICloud.rawValue)
-            object.removeValue(forKey: AppSettings.CodingKeys.iCloudPasswordsDiaAutomationEnabled.rawValue)
-            object.removeValue(forKey: AppSettings.CodingKeys.inputSourceSwitchingEnabled.rawValue)
-        }
         return (try? JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])) ?? data
     }
 
@@ -368,38 +319,12 @@ final class SettingsStore {
         try? data.write(to: backupURL, options: [.atomic])
     }
 
-    private func readData(from url: URL, coordinated: Bool) -> Data? {
-        guard coordinated else {
-            return try? Data(contentsOf: url)
-        }
-
-        var coordinatorError: NSError?
-        var loadedData: Data?
-        let coordinator = NSFileCoordinator()
-        coordinator.coordinate(readingItemAt: url, options: .withoutChanges, error: &coordinatorError) { coordinatedURL in
-            loadedData = try? Data(contentsOf: coordinatedURL)
-        }
-        if coordinatorError != nil {
-            return try? Data(contentsOf: url)
-        }
-        return loadedData
+    private func readData(from url: URL) -> Data? {
+        try? Data(contentsOf: url)
     }
 
-    private func writeIfChanged(_ data: Data, to url: URL, coordinated: Bool = false, existingData: Data? = nil) {
-        if let currentData = existingData ?? readData(from: url, coordinated: coordinated), currentData == data {
-            return
-        }
-
-        if coordinated {
-            var coordinatorError: NSError?
-            let coordinator = NSFileCoordinator()
-            coordinator.coordinate(writingItemAt: url, options: .forReplacing, error: &coordinatorError) { coordinatedURL in
-                try? fileManager.createDirectory(at: coordinatedURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-                try? data.write(to: coordinatedURL, options: [.atomic])
-            }
-            if coordinatorError != nil {
-                try? data.write(to: url, options: [.atomic])
-            }
+    private func writeIfChanged(_ data: Data, to url: URL, existingData: Data? = nil) {
+        if let currentData = existingData ?? readData(from: url), currentData == data {
             return
         }
 
