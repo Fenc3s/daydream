@@ -12,14 +12,13 @@ struct InputSourceSettingsView: View {
     @State private var runningApps: [RunningAppOption] = []
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                automaticSwitchingSection
-                applicationRulesSection
-            }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: "Input Sources",
+                subtitle: "Automatically switch keyboard layouts and input methods based on the active app."
+            )
+            automaticSwitchingSection
+            applicationRulesSection
         }
         .onAppear {
             refreshInputSourcesAndApplications()
@@ -51,7 +50,7 @@ struct InputSourceSettingsView: View {
     private var automaticSwitchingSection: some View {
         settingsSection(title: "Automatic Switching") {
             settingsGroup {
-                settingsRow("Input Source Switching") {
+                settingsRow("Input Source Switching", alignment: .top) {
                     VStack(alignment: .leading, spacing: 6) {
                         Toggle(
                             "Automatically switch input source by active app",

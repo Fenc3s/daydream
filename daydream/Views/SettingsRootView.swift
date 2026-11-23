@@ -9,26 +9,56 @@ struct SettingsRootView: View {
     var body: some View {
         NavigationSplitView {
             List(SettingsSection.allCases, selection: selectionBinding) { section in
-                Label(section.rawValue, systemImage: iconName(for: section))
-                    .tag(section)
+                SettingsSidebarRow(
+                    section: section,
+                    badgeKind: badgeKind(for: section)
+                )
+                .tag(section)
             }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200, max: 220)
+            .navigationSplitViewColumnWidth(min: 205, ideal: 220, max: 245)
             .listStyle(.sidebar)
-        } detail: {
-            switch appModel.selectedSettingsSection {
-            case .general:
-                GeneralSettingsView(appModel: appModel)
-            case .memory:
-                MemorySettingsView(appModel: appModel)
-            case .clipboardHistory:
-                ClipboardHistorySettingsView(appModel: appModel)
-            case .inputSources:
-                InputSourceSettingsView(appModel: appModel)
-            case .commands:
-                CommandsSettingsView(appModel: appModel)
-            case .versionHistory:
-                VersionHistorySettingsView(appModel: appModel)
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                VStack(spacing: 0) {
+                    Divider()
+                        .opacity(0.5)
+                    HStack(spacing: 6) {
+                        Text("Daydream")
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(.secondary)
+                        Spacer()
+                        Text(appModel.applicationVersionDisplay)
+                            .font(.caption2.monospacedDigit())
+                            .foregroundStyle(.tertiary)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(
+                                Capsule(style: .continuous)
+                                    .fill(Color.primary.opacity(0.05))
+                            )
+                    }
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 10)
+                }
             }
+        } detail: {
+            Group {
+                switch appModel.selectedSettingsSection {
+                case .general:
+                    GeneralSettingsView(appModel: appModel)
+                case .memory:
+                    MemorySettingsView(appModel: appModel)
+                case .clipboardHistory:
+                    ClipboardHistorySettingsView(appModel: appModel)
+                case .inputSources:
+                    InputSourceSettingsView(appModel: appModel)
+                case .commands:
+                    CommandsSettingsView(appModel: appModel)
+                case .versionHistory:
+                    VersionHistorySettingsView(appModel: appModel)
+                }
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .background(Color(nsColor: .windowBackgroundColor))
         }
         .background(
             SettingsWindowConfigurator { window in
@@ -52,20 +82,125 @@ struct SettingsRootView: View {
         )
     }
 
-    private func iconName(for section: SettingsSection) -> String {
+    private func badgeKind(for section: SettingsSection) -> SettingsSidebarBadge? {
         switch section {
         case .general:
-            return "gearshape"
+            if !appModel.diagnostics.accessibilityTrusted {
+                return .warning("Accessibility permission required")
+            }
+            if appModel.hotKeyConflicts.contains(AppModel.moveWindowShortcutID) {
+                return .warning("Shortcut conflict")
+            }
+            return nil
+        case .clipboardHistory:
+            if appModel.hotKeyConflicts.contains(AppModel.clipboardHistoryShortcutID) {
+                return .warning("Shortcut conflict")
+            }
+            return nil
+        case .commands:
+            let hasCommandConflict = appModel.settings.commands.contains {
+                appModel.hotKeyConflicts.contains($0.id) || appModel.duplicateCommandIdentifiers.contains($0.id)
+            }
+            return hasCommandConflict ? .warning("Command shortcut or ID conflict") : nil
+        case .memory, .inputSources, .versionHistory:
+            return nil
+        }
+    }
+}
+
+private enum SettingsSidebarBadge {
+    case warning(String)
+}
+
+private struct SettingsSidebarRow: View {
+    let section: SettingsSection
+    let badgeKind: SettingsSidebarBadge?
+
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        HStack(spacing: 10) {
+            SettingsSidebarIcon(section: section)
+
+            Text(section.rawValue)
+                .font(.body)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            if case let .warning(helpText) = badgeKind {
+                Circle()
+                    .fill(Color.orange)
+                    .frame(width: 7, height: 7)
+                    .opacity(appearsActive ? 1.0 : 0.55)
+                    .help(helpText)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+private struct SettingsSidebarIcon: View {
+    let section: SettingsSection
+
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6, style: .continuous)
+                .fill(
+                    LinearGradient(
+                        colors: gradientColors,
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .strokeBorder(.white.opacity(0.22), lineWidth: 0.5)
+                )
+                .shadow(color: .black.opacity(0.08), radius: 1, y: 0.5)
+
+            Image(systemName: iconName)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(.white)
+        }
+        .frame(width: 22, height: 22)
+        .saturation(appearsActive ? 1.0 : 0.35)
+        .opacity(appearsActive ? 1.0 : 0.72)
+    }
+
+    private var iconName: String {
+        switch section {
+        case .general:
+            return "gearshape.fill"
         case .memory:
             return "brain"
         case .clipboardHistory:
-            return "clipboard"
+            return "clipboard.fill"
         case .inputSources:
-            return "keyboard"
+            return "keyboard.fill"
         case .commands:
             return "command"
         case .versionHistory:
             return "clock.arrow.circlepath"
+        }
+    }
+
+    private var gradientColors: [Color] {
+        switch section {
+        case .general:
+            return [Color(red: 0.55, green: 0.57, blue: 0.61), Color(red: 0.41, green: 0.43, blue: 0.47)]
+        case .memory:
+            return [Color(red: 0.69, green: 0.38, blue: 0.94), Color(red: 0.53, green: 0.24, blue: 0.82)]
+        case .clipboardHistory:
+            return [Color(red: 0.22, green: 0.58, blue: 0.98), Color(red: 0.11, green: 0.43, blue: 0.88)]
+        case .inputSources:
+            return [Color(red: 0.16, green: 0.72, blue: 0.74), Color(red: 0.08, green: 0.56, blue: 0.60)]
+        case .commands:
+            return [Color(red: 0.98, green: 0.57, blue: 0.20), Color(red: 0.89, green: 0.41, blue: 0.10)]
+        case .versionHistory:
+            return [Color(red: 0.37, green: 0.42, blue: 0.92), Color(red: 0.26, green: 0.30, blue: 0.78)]
         }
     }
 }
@@ -106,9 +241,9 @@ private final class SettingsWindowConfigurationView: NSView {
         guard let window else { return }
 
         onResolveWindow(window)
-        window.toolbarStyle = .unifiedCompact
-        window.titleVisibility = .visible
-        window.titlebarAppearsTransparent = false
+        window.toolbarStyle = .unified
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
     }
 }
 
@@ -116,105 +251,147 @@ private struct VersionHistorySettingsView: View {
     let appModel: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                HStack(spacing: 12) {
-                    Text("Version History")
-                        .font(.system(size: 28, weight: .semibold, design: .rounded))
-
-                    Spacer()
-
-                    Button("Refresh") {
-                        Task {
-                            await appModel.refreshDiagnostics()
-                        }
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: "Version History",
+                subtitle: "Inspect application build version, Git repository status, and recent commits."
+            ) {
+                Button {
+                    Task {
+                        await appModel.refreshDiagnostics()
                     }
-                    .buttonStyle(.borderedProminent)
+                } label: {
+                    Label("Refresh", systemImage: "arrow.clockwise")
                 }
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
+            }
 
-                settingsSection(title: "Application") {
-                    settingsGroup {
-                        settingsRow("Version") {
-                            Text(appModel.applicationVersionDisplay)
+            settingsSection(title: "Application") {
+                settingsGroup {
+                    settingsRow("Version") {
+                        Text(appModel.applicationVersionDisplay)
+                            .font(.body.monospacedDigit())
+                            .textSelection(.enabled)
+                    }
+
+                    if appModel.diagnostics.gitVersion.isAvailable {
+                        Divider()
+
+                        settingsRow("Git Commit") {
+                            Text(appModel.diagnostics.gitVersion.shortCommitHash)
+                                .font(.system(.callout, design: .monospaced, weight: .medium))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 3)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                                        .fill(Color.primary.opacity(0.05))
+                                )
                                 .textSelection(.enabled)
                         }
 
-                        if appModel.diagnostics.gitVersion.isAvailable {
-                            Divider()
+                        Divider()
 
-                            settingsRow("Git Commit") {
-                                Text(appModel.diagnostics.gitVersion.shortCommitHash)
-                                    .font(.system(.body, design: .monospaced))
-                                    .textSelection(.enabled)
-                            }
-
-                            Divider()
-
-                            settingsRow("Branch") {
-                                Text(appModel.diagnostics.gitVersion.branch)
-                                    .textSelection(.enabled)
-                            }
-
-                            Divider()
-
-                            settingsRow("Repository") {
-                                Text(appModel.diagnostics.gitVersion.repositoryPath)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                                    .textSelection(.enabled)
-                            }
-                        } else {
-                            Divider()
-
-                            Text(appModel.diagnostics.gitVersion.availabilityMessage.isEmpty
-                                ? "Git metadata is unavailable."
-                                : appModel.diagnostics.gitVersion.availabilityMessage)
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 10)
+                        settingsRow("Branch") {
+                            Text(appModel.diagnostics.gitVersion.branch)
+                                .textSelection(.enabled)
                         }
+
+                        Divider()
+
+                        settingsRow("Repository") {
+                            Text(appModel.diagnostics.gitVersion.repositoryPath)
+                                .font(.system(.callout, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .textSelection(.enabled)
+                        }
+                    } else {
+                        Divider()
+
+                        Text(appModel.diagnostics.gitVersion.availabilityMessage.isEmpty
+                            ? "Git metadata is unavailable."
+                            : appModel.diagnostics.gitVersion.availabilityMessage)
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 10)
                     }
                 }
+            }
 
-                settingsSection(title: "Git Commit History") {
-                    settingsGroup {
-                        if appModel.diagnostics.gitCommitHistory.isEmpty {
-                            Text("No Git commit history is available.")
-                                .foregroundStyle(.secondary)
-                                .padding(.vertical, 10)
-                        } else {
-                            ForEach(appModel.diagnostics.gitCommitHistory, id: \.self) { commit in
-                                Text(commit)
-                                    .font(.system(.body, design: .monospaced))
-                                    .textSelection(.enabled)
-                                    .padding(.vertical, 5)
+            settingsSection(title: "Git Commit History") {
+                settingsGroup {
+                    if appModel.diagnostics.gitCommitHistory.isEmpty {
+                        Text("No Git commit history is available.")
+                            .font(.subheadline)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 10)
+                    } else {
+                        ForEach(Array(appModel.diagnostics.gitCommitHistory.enumerated()), id: \.offset) { index, commit in
+                            if index > 0 {
+                                Divider()
                             }
-                        }
-                    }
-                }
-
-                settingsSection(title: "Actions") {
-                    settingsGroup {
-                        HStack(spacing: 10) {
-                            Button("Reveal Repository") {
-                                appModel.revealRepository()
-                            }
-                            .disabled(!appModel.diagnostics.gitVersion.isAvailable)
-
-                            Button("Reveal Version Log") {
-                                appModel.revealVersionLogFile()
-                            }
-
-                            Spacer()
+                            commitRow(commit)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
+
+            settingsSection(title: "Actions") {
+                settingsGroup {
+                    HStack(spacing: 10) {
+                        Button {
+                            appModel.revealRepository()
+                        } label: {
+                            Label("Reveal Repository", systemImage: "folder")
+                        }
+                        .disabled(!appModel.diagnostics.gitVersion.isAvailable)
+
+                        Button {
+                            appModel.revealVersionLogFile()
+                        } label: {
+                            Label("Reveal Version Log", systemImage: "doc.text")
+                        }
+
+                        Spacer()
+                    }
+                    .padding(.vertical, 4)
+                }
+            }
         }
         .task {
             await appModel.refreshDiagnostics()
+        }
+    }
+
+    @ViewBuilder
+    private func commitRow(_ commit: String) -> some View {
+        let parts = commit.split(separator: " ", maxSplits: 1, omittingEmptySubsequences: true)
+        if parts.count == 2 {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Text(String(parts[0]))
+                    .font(.system(.caption, design: .monospaced, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 3)
+                    .background(
+                        RoundedRectangle(cornerRadius: 5, style: .continuous)
+                            .fill(Color.primary.opacity(0.05))
+                    )
+                    .textSelection(.enabled)
+
+                Text(String(parts[1]))
+                    .font(.body)
+                    .textSelection(.enabled)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            .padding(.vertical, 8)
+        } else {
+            Text(commit)
+                .font(.system(.callout, design: .monospaced))
+                .textSelection(.enabled)
+                .padding(.vertical, 7)
         }
     }
 }
@@ -223,254 +400,255 @@ private struct GeneralSettingsView: View {
     let appModel: AppModel
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                settingsSection(title: "Model & Endpoint") {
-                    settingsGroup {
-                        settingsRow("Provider") {
-                            Picker(
-                                "",
-                                selection: Binding(
-                                    get: { appModel.settings.provider },
-                                    set: { appModel.selectProvider($0) }
-                                )
-                            ) {
-                                ForEach(AIProvider.allCases) { provider in
-                                    Text(provider.displayName).tag(provider)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: 240, alignment: .leading)
-                        }
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: "General",
+                subtitle: "Configure AI providers, default models, permissions, and window shortcuts."
+            )
 
-                        Divider()
-
-                        switch appModel.settings.provider {
-                        case .openRouter:
-                            settingsRow("OpenRouter URL") {
-                                TextField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.openRouterBaseURL },
-                                        set: {
-                                            appModel.settings.openRouterBaseURL = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-
-                            Divider()
-
-                            settingsRow("OpenRouter API Key") {
-                                SecureField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.openRouterAPIKey },
-                                        set: {
-                                            appModel.settings.openRouterAPIKey = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-
-                        case .deepSeek:
-                            settingsRow("DeepSeek URL") {
-                                TextField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.deepSeekBaseURL },
-                                        set: {
-                                            appModel.settings.deepSeekBaseURL = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-
-                            Divider()
-
-                            settingsRow("DeepSeek API Key") {
-                                SecureField(
-                                    "",
-                                    text: Binding(
-                                        get: { appModel.settings.deepSeekAPIKey },
-                                        set: {
-                                            appModel.settings.deepSeekAPIKey = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                )
-                                .textFieldStyle(.roundedBorder)
-                            }
-
-                        case .chatGPT:
-                            settingsRow("ChatGPT Account") {
-                                VStack(alignment: .leading, spacing: 8) {
-                                    if appModel.isSigningInWithChatGPT {
-                                        HStack(spacing: 10) {
-                                            ProgressView()
-                                                .controlSize(.small)
-                                            Text("Waiting for browser sign-in…")
-                                                .foregroundStyle(.secondary)
-                                            Spacer()
-                                            Button("Cancel") {
-                                                appModel.cancelChatGPTSignIn()
-                                            }
-                                        }
-                                    } else if let session = appModel.chatGPTAuthSession {
-                                        HStack(spacing: 8) {
-                                            Circle()
-                                                .fill(session.hasDirectPlanUsageScope ? .green : .orange)
-                                                .frame(width: 8, height: 8)
-                                            Text("Signed in as \(session.displayIdentity)")
-                                                .lineLimit(1)
-                                                .truncationMode(.middle)
-                                            Spacer()
-                                            Button("Sign Out") {
-                                                appModel.signOutOfChatGPT()
-                                            }
-                                        }
-
-                                        Text("Uses your ChatGPT plan via Sign in with ChatGPT (OAuth + PKCE). Tokens refresh automatically.")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    } else {
-                                        Button("Sign in with ChatGPT") {
-                                            appModel.signInWithChatGPT()
-                                        }
-                                        .buttonStyle(.borderedProminent)
-
-                                        Text("Authenticate in your browser to use your ChatGPT Plus or Pro plan without an API key.")
-                                            .font(.caption)
-                                            .foregroundStyle(.secondary)
-                                    }
-
-                                    if let statusMessage = appModel.chatGPTAuthStatusMessage,
-                                       !statusMessage.isEmpty {
-                                        Text(statusMessage)
-                                            .font(.caption)
-                                            .foregroundStyle(
-                                                appModel.chatGPTAuthSession == nil && !appModel.isSigningInWithChatGPT
-                                                    ? .red
-                                                    : .secondary
-                                            )
-                                            .fixedSize(horizontal: false, vertical: true)
-                                    }
-                                }
+            settingsSection(title: "Model & Endpoint") {
+                settingsGroup {
+                    settingsRow("Provider") {
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { appModel.settings.provider },
+                                set: { appModel.selectProvider($0) }
+                            )
+                        ) {
+                            ForEach(AIProvider.allCases) { provider in
+                                Text(provider.displayName).tag(provider)
                             }
                         }
+                        .pickerStyle(.segmented)
+                        .labelsHidden()
+                        .frame(maxWidth: 320, alignment: .leading)
+                    }
 
-                        Divider()
+                    Divider()
 
-                        settingsRow("Default Model") {
-                            Picker(
+                    switch appModel.settings.provider {
+                    case .openRouter:
+                        settingsRow("OpenRouter URL") {
+                            TextField(
                                 "",
-                                selection: Binding(
-                                    get: { appModel.settings.defaultModel },
-                                    set: { selectedModel in
-                                        appModel.settings.setDefaultModel(selectedModel, for: appModel.settings.provider)
+                                text: Binding(
+                                    get: { appModel.settings.openRouterBaseURL },
+                                    set: {
+                                        appModel.settings.openRouterBaseURL = $0
                                         appModel.saveSettings()
                                     }
                                 )
-                            ) {
-                                ForEach(availableModels, id: \.self) { model in
-                                    Text(model).tag(model)
-                                }
-                            }
-                            .pickerStyle(.menu)
-                            .labelsHidden()
-                            .frame(maxWidth: 420, alignment: .leading)
+                            )
+                            .textFieldStyle(.roundedBorder)
                         }
 
                         Divider()
 
-                        settingsRow("Default Reasoning") {
-                            VStack(alignment: .leading, spacing: 6) {
-                                Picker("", selection: Binding(
-                                    get: { appModel.defaultReasoningMode(for: appModel.settings.defaultModel) },
-                                    set: { appModel.selectDefaultReasoning($0) }
-                                )) {
-                                    ForEach(appModel.availableReasoningModes(for: appModel.settings.defaultModel)) { mode in
-                                        Text(mode.displayName).tag(mode)
+                        settingsRow("OpenRouter API Key") {
+                            SecureField(
+                                "",
+                                text: Binding(
+                                    get: { appModel.settings.openRouterAPIKey },
+                                    set: {
+                                        appModel.settings.openRouterAPIKey = $0
+                                        appModel.saveSettings()
                                     }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+
+                    case .deepSeek:
+                        settingsRow("DeepSeek URL") {
+                            TextField(
+                                "",
+                                text: Binding(
+                                    get: { appModel.settings.deepSeekBaseURL },
+                                    set: {
+                                        appModel.settings.deepSeekBaseURL = $0
+                                        appModel.saveSettings()
+                                    }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+
+                        Divider()
+
+                        settingsRow("DeepSeek API Key") {
+                            SecureField(
+                                "",
+                                text: Binding(
+                                    get: { appModel.settings.deepSeekAPIKey },
+                                    set: {
+                                        appModel.settings.deepSeekAPIKey = $0
+                                        appModel.saveSettings()
+                                    }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+
+                    case .chatGPT:
+                        settingsRow("ChatGPT Account", alignment: .top) {
+                            VStack(alignment: .leading, spacing: 8) {
+                                if appModel.isSigningInWithChatGPT {
+                                    HStack(spacing: 10) {
+                                        ProgressView()
+                                            .controlSize(.small)
+                                        Text("Waiting for browser sign-in…")
+                                            .foregroundStyle(.secondary)
+                                        Spacer()
+                                        Button("Cancel") {
+                                            appModel.cancelChatGPTSignIn()
+                                        }
+                                    }
+                                } else if let session = appModel.chatGPTAuthSession {
+                                    HStack(spacing: 10) {
+                                        SettingsStatusPill(
+                                            text: "Signed in as \(session.displayIdentity)",
+                                            color: session.hasDirectPlanUsageScope ? .green : .orange
+                                        )
+                                        Spacer()
+                                        Button("Sign Out") {
+                                            appModel.signOutOfChatGPT()
+                                        }
+                                    }
+
+                                    Text("Uses your ChatGPT plan via Sign in with ChatGPT (OAuth + PKCE). Tokens refresh automatically.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                } else {
+                                    Button("Sign in with ChatGPT") {
+                                        appModel.signInWithChatGPT()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Text("Authenticate in your browser to use your ChatGPT Plus or Pro plan without an API key.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
-                                .labelsHidden()
-                                .pickerStyle(.menu)
-                                Text("Saved separately for the selected default model. Used by commands that use default reasoning.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+
+                                if let statusMessage = appModel.chatGPTAuthStatusMessage,
+                                   !statusMessage.isEmpty {
+                                    Text(statusMessage)
+                                        .font(.caption)
+                                        .foregroundStyle(
+                                            appModel.chatGPTAuthSession == nil && !appModel.isSigningInWithChatGPT
+                                                ? .red
+                                                : .secondary
+                                        )
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
                     }
-                }
 
-                settingsSection(title: "\(appModel.settings.provider.displayName) Models") {
-                    ProviderModelCatalogEditor(
-                        appModel: appModel,
-                        provider: appModel.settings.provider
-                    )
-                    .id(appModel.settings.provider)
-                }
+                    Divider()
 
-                settingsSection(title: "Permissions") {
-                    settingsGroup {
-                        settingsRow("Accessibility") {
-                            HStack(spacing: 8) {
-                                Circle()
-                                    .fill(appModel.diagnostics.accessibilityTrusted ? .green : .orange)
-                                    .frame(width: 8, height: 8)
-                                Text(appModel.diagnostics.accessibilityTrusted ? "Granted" : "Required")
-                                    .foregroundStyle(.secondary)
+                    settingsRow("Default Model") {
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { appModel.settings.defaultModel },
+                                set: { selectedModel in
+                                    appModel.settings.setDefaultModel(selectedModel, for: appModel.settings.provider)
+                                    appModel.saveSettings()
+                                }
+                            )
+                        ) {
+                            ForEach(availableModels, id: \.self) { model in
+                                Text(model).tag(model)
                             }
                         }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: 380, alignment: .leading)
+                    }
 
-                        Divider()
+                    Divider()
 
+                    settingsRow("Default Reasoning", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Picker("", selection: Binding(
+                                get: { appModel.defaultReasoningMode(for: appModel.settings.defaultModel) },
+                                set: { appModel.selectDefaultReasoning($0) }
+                            )) {
+                                ForEach(appModel.availableReasoningModes(for: appModel.settings.defaultModel)) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .labelsHidden()
+                            .pickerStyle(.menu)
+                            .frame(maxWidth: 220, alignment: .leading)
+
+                            Text("Saved separately for the selected default model. Used by commands that use default reasoning.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+                }
+            }
+
+            ProviderModelCatalogEditor(
+                appModel: appModel,
+                provider: appModel.settings.provider
+            )
+            .id(appModel.settings.provider)
+
+            settingsSection(title: "Permissions") {
+                settingsGroup {
+                    settingsRow("Accessibility") {
                         HStack(spacing: 10) {
-                            Button("Request Access") {
-                                appModel.promptForAccessibilityPermission()
+                            SettingsStatusPill(
+                                text: appModel.diagnostics.accessibilityTrusted ? "Granted" : "Required",
+                                color: appModel.diagnostics.accessibilityTrusted ? .green : .orange
+                            )
+
+                            Spacer()
+
+                            if !appModel.diagnostics.accessibilityTrusted {
+                                Button("Request Access") {
+                                    appModel.promptForAccessibilityPermission()
+                                }
                             }
 
                             Button("Open Settings") {
                                 appModel.openAccessibilitySettings()
                             }
-
-                            Spacer()
                         }
+                    }
 
-                        Divider()
+                    Divider()
 
-                        settingsRow("iCloud Passwords for Browsers") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                Toggle(
-                                    "Enable verification automation",
-                                    isOn: Binding(
-                                        get: { appModel.settings.iCloudPasswordsDiaAutomationEnabled },
-                                        set: { appModel.setICloudPasswordsDiaAutomationEnabled($0) }
-                                    )
+                    settingsRow("iCloud Passwords", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            Toggle(
+                                "Enable verification automation for browsers",
+                                isOn: Binding(
+                                    get: { appModel.settings.iCloudPasswordsDiaAutomationEnabled },
+                                    set: { appModel.setICloudPasswordsDiaAutomationEnabled($0) }
                                 )
+                            )
 
-                                Text(appModel.iCloudPasswordsAutomationStatus.displayText)
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
+                            Text(appModel.iCloudPasswordsAutomationStatus.displayText)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
 
-                                Text("Waits for an iCloud Passwords plugin click in Dia, Google Chrome, or Google Chrome Canary and completes verification if required. It does not open the extension when a browser launches.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Waits for an iCloud Passwords plugin click in Dia, Google Chrome, or Google Chrome Canary and completes verification if required. It does not open the extension when a browser launches.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
+            }
 
-                settingsSection(title: "Window Management") {
-                    settingsGroup {
-                        settingsRow("Move Window to Next Monitor") {
-                            VStack(alignment: .leading, spacing: 8) {
+            settingsSection(title: "Window Management") {
+                settingsGroup {
+                    settingsRow("Move Window to Next Monitor", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            HStack(spacing: 10) {
                                 ShortcutRecorderField(
                                     shortcut: appModel.settings.moveWindowShortcut,
                                     hasConflict: appModel.hotKeyConflicts.contains(AppModel.moveWindowShortcutID),
@@ -480,28 +658,22 @@ private struct GeneralSettingsView: View {
                                     appModel.saveSettings(reloadHotKeys: true)
                                 }
 
-                                HStack(spacing: 10) {
-                                    Text("Moves the focused window of the frontmost application to the next monitor.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
+                                Spacer()
 
-                                    Spacer()
-
-                                    Button("Reset to Default") {
-                                        appModel.settings.moveWindowShortcut = AppSettings.defaultMoveWindowShortcut
-                                        appModel.saveSettings(reloadHotKeys: true)
-                                    }
-                                    .disabled(appModel.settings.moveWindowShortcut == AppSettings.defaultMoveWindowShortcut)
+                                Button("Reset to Default") {
+                                    appModel.settings.moveWindowShortcut = AppSettings.defaultMoveWindowShortcut
+                                    appModel.saveSettings(reloadHotKeys: true)
                                 }
+                                .disabled(appModel.settings.moveWindowShortcut == AppSettings.defaultMoveWindowShortcut)
                             }
+
+                            Text("Moves the focused window of the frontmost application to the next monitor.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
-
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
         }
         .onAppear {
             appModel.ensureCredentialsLoaded(for: appModel.settings.provider)
@@ -534,110 +706,160 @@ private struct ProviderModelCatalogEditor: View {
     @State private var reasoningTarget: ModelReasoningTarget?
 
     var body: some View {
-        settingsGroup {
-            HStack {
-                Text("Enabled Models").font(.headline)
-                Spacer()
+        settingsSection(title: "\(provider.displayName) Models") {
+            HStack(spacing: 8) {
                 if appModel.refreshingModelProviders.contains(provider.rawValue) {
                     ProgressView().controlSize(.small)
                 }
                 Button("Refresh Models", systemImage: "arrow.clockwise") {
                     appModel.refreshProviderModels(provider)
                 }
+                .controlSize(.small)
                 .disabled(appModel.refreshingModelProviders.contains(provider.rawValue))
             }
-            Text(appModel.modelCatalogStatus[provider.rawValue] ?? "Refresh to discover models from this provider.")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            VStack(alignment: .leading, spacing: 10) {
-                ForEach(catalog, id: \.self) { model in
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            Text(model)
-                                .font(.system(.body, design: .monospaced))
-                                .lineLimit(1)
-                                .truncationMode(.middle)
-                            Text(reasoningSummary(for: model))
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                                .fixedSize(horizontal: false, vertical: true)
-                        }
-
-                        Spacer()
-
-                        if model == appModel.settings.defaultModel(for: provider) {
-                            Text("Default")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
-
-                        Button("Reasoning…") {
-                            reasoningTarget = ModelReasoningTarget(model: model)
-                        }
-                        .buttonStyle(.borderless)
-                        .accessibilityLabel("Configure reasoning efforts for \(model)")
-                        .help("Define the reasoning effort levels offered for this model")
-
-                        Button {
-                            appModel.removeProviderModel(model, for: provider)
-                        } label: {
-                            Image(systemName: "minus.circle")
-                                .accessibilityLabel("Remove \(model)")
-                        }
-                        .buttonStyle(.borderless)
-                        .disabled(catalog.count <= 1)
-                        .help("Remove model")
-                    }
-                    .padding(.vertical, 3)
-                }
-            }
-
-            Divider()
-
-            TextField("Search available models", text: $modelSearch)
-                .textFieldStyle(.roundedBorder)
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 8) {
-                    ForEach(filteredDiscoveredModels, id: \.self) { model in
-                        HStack {
-                            Text(model).font(.system(.caption, design: .monospaced))
-                            Spacer()
-                            Button(catalog.contains(model) ? "Added" : "Add") {
-                                appModel.addProviderModel(model, for: provider)
-                            }
-                            .disabled(catalog.contains(model))
-                        }
-                    }
-                }
-            }
-            .frame(maxHeight: 220)
-
-            settingsRow("Add Model") {
-                HStack(spacing: 8) {
-                    TextField(modelPlaceholder, text: $newModel)
-                        .textFieldStyle(.roundedBorder)
-                        .onSubmit(addModel)
-
-                    Button("Add") {
-                        addModel()
-                    }
-                    .disabled(newModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: 10) {
-                Text("Model IDs are stored separately for each provider.")
-                    .font(.subheadline)
+        } content: {
+            settingsGroup {
+                Text(appModel.modelCatalogStatus[provider.rawValue] ?? "Refresh to discover models from this provider.")
+                    .font(.caption)
                     .foregroundStyle(.secondary)
+                    .padding(.bottom, 10)
 
-                Spacer()
+                VStack(alignment: .leading, spacing: 0) {
+                    ForEach(Array(catalog.enumerated()), id: \.element) { index, model in
+                        if index > 0 {
+                            Divider()
+                        }
+                        HStack(spacing: 10) {
+                            VStack(alignment: .leading, spacing: 3) {
+                                HStack(spacing: 7) {
+                                    Text(model)
+                                        .font(.system(.body, design: .monospaced))
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
 
-                Button("Reset to Defaults") {
-                    appModel.resetProviderModelCatalog(for: provider)
+                                    if model == appModel.settings.defaultModel(for: provider) {
+                                        Text("Default")
+                                            .font(.caption2.weight(.semibold))
+                                            .foregroundStyle(Color.accentColor)
+                                            .padding(.horizontal, 7)
+                                            .padding(.vertical, 2)
+                                            .background(
+                                                Capsule(style: .continuous)
+                                                    .fill(Color.accentColor.opacity(0.12))
+                                            )
+                                    }
+                                }
+
+                                Text(reasoningSummary(for: model))
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+
+                            Spacer()
+
+                            Button("Reasoning…") {
+                                reasoningTarget = ModelReasoningTarget(model: model)
+                            }
+                            .buttonStyle(.borderless)
+                            .foregroundStyle(Color.accentColor)
+                            .accessibilityLabel("Configure reasoning efforts for \(model)")
+                            .help("Define the reasoning effort levels offered for this model")
+
+                            Button {
+                                appModel.removeProviderModel(model, for: provider)
+                            } label: {
+                                Image(systemName: "minus.circle")
+                                    .foregroundStyle(.secondary)
+                                    .accessibilityLabel("Remove \(model)")
+                            }
+                            .buttonStyle(.borderless)
+                            .disabled(catalog.count <= 1)
+                            .help("Remove model")
+                        }
+                        .padding(.vertical, 8)
+                    }
                 }
-                .disabled(catalog == AppSettings.modelCatalog(for: provider))
+
+                Divider()
+                    .padding(.vertical, 8)
+
+                VStack(alignment: .leading, spacing: 10) {
+                    SettingsSearchField(placeholder: "Search available models", text: $modelSearch)
+
+                    if !filteredDiscoveredModels.isEmpty {
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 0) {
+                                ForEach(Array(filteredDiscoveredModels.enumerated()), id: \.element) { index, model in
+                                    if index > 0 {
+                                        Divider()
+                                    }
+                                    HStack(spacing: 8) {
+                                        Text(model)
+                                            .font(.system(.caption, design: .monospaced))
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                        Spacer()
+                                        Button(catalog.contains(model) ? "Added" : "Add") {
+                                            appModel.addProviderModel(model, for: provider)
+                                        }
+                                        .controlSize(.small)
+                                        .disabled(catalog.contains(model))
+                                    }
+                                    .padding(.horizontal, 10)
+                                    .padding(.vertical, 6)
+                                }
+                            }
+                        }
+                        .frame(maxHeight: 200)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(Color.primary.opacity(0.025))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5)
+                        )
+                    } else if !modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Text("No discovered models match “\(modelSearch)”.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .padding(.vertical, 4)
+                    }
+                }
+
+                Divider()
+                    .padding(.top, 10)
+
+                settingsRow("Add Custom Model") {
+                    HStack(spacing: 8) {
+                        TextField(modelPlaceholder, text: $newModel)
+                            .textFieldStyle(.roundedBorder)
+                            .onSubmit(addModel)
+
+                        Button("Add") {
+                            addModel()
+                        }
+                        .disabled(newModel.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                }
+
+                Divider()
+
+                HStack(spacing: 10) {
+                    Text("Model IDs are stored separately for each provider.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+
+                    Spacer()
+
+                    Button("Reset to Defaults") {
+                        appModel.resetProviderModelCatalog(for: provider)
+                    }
+                    .controlSize(.small)
+                    .disabled(catalog == AppSettings.modelCatalog(for: provider))
+                }
+                .padding(.top, 10)
             }
         }
         .sheet(item: $reasoningTarget) { target in
@@ -708,11 +930,15 @@ private struct ModelReasoningEditor: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text("Reasoning Efforts").font(.title2.bold())
-            Text("\(provider.displayName) · \(model)")
-                .font(.system(.subheadline, design: .monospaced))
-                .textSelection(.enabled)
-                .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Reasoning Efforts")
+                    .font(.title2.weight(.semibold))
+                Text("\(provider.displayName) · \(model)")
+                    .font(.system(.subheadline, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Picker("Definition", selection: $useManualEfforts) {
                 Text("Automatic (catalog + verified cache)").tag(false)
@@ -751,6 +977,7 @@ private struct ModelReasoningEditor: View {
                     appModel.setManualReasoningEfforts(useManualEfforts ? Array(selectedEfforts) : nil, for: model, provider: provider)
                     dismiss()
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
             }
         }
@@ -778,109 +1005,106 @@ private struct MemorySettingsView: View {
     }
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                settingsSection(title: "AI Memory") {
-                    settingsGroup {
-                        Toggle(
-                            "Remember useful context from AI Commands",
-                            isOn: Binding(
-                                get: { appModel.settings.memoryEnabled },
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: "Memory",
+                subtitle: "Store compact local context that automatically enriches matching AI Commands."
+            )
+
+            settingsSection(title: "AI Memory") {
+                settingsGroup {
+                    Toggle(
+                        "Remember useful context from AI Commands",
+                        isOn: Binding(
+                            get: { appModel.settings.memoryEnabled },
+                            set: {
+                                appModel.settings.memoryEnabled = $0
+                                appModel.saveSettings()
+                            }
+                        )
+                    )
+                    .padding(.vertical, 8)
+
+                    Divider()
+
+                    settingsRow("Maximum Entries") {
+                        Stepper(
+                            value: Binding(
+                                get: { appModel.settings.memoryLimit },
                                 set: {
-                                    appModel.settings.memoryEnabled = $0
+                                    appModel.settings.memoryLimit = AppSettings.normalizedMemoryLimit($0)
                                     appModel.saveSettings()
                                 }
-                            )
+                            ),
+                            in: 10...500,
+                            step: 10
+                        ) {
+                            Text("\(appModel.settings.memoryLimit)")
+                                .monospacedDigit()
+                        }
+                        .frame(maxWidth: 160, alignment: .leading)
+                    }
+
+                    Divider()
+
+                    Text("Memories are stored locally in Application Support and injected only as compact context when they match a command selection.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 10)
+                        .padding(.bottom, 2)
+                }
+            }
+
+            settingsSection(title: "Saved Memories") {
+                HStack(spacing: 8) {
+                    Button {
+                        editingMemory = nil
+                        isShowingMemoryEditor = true
+                    } label: {
+                        Label("Add Memory", systemImage: "plus")
+                    }
+                    .controlSize(.small)
+
+                    Button("Delete All", role: .destructive) {
+                        showingDeleteConfirmation = true
+                    }
+                    .controlSize(.small)
+                    .disabled(appModel.memoryEntries.isEmpty)
+                }
+            } content: {
+                settingsGroup {
+                    SettingsSearchField(placeholder: "Search memories", text: $searchText)
+                        .padding(.vertical, 4)
+
+                    if filteredMemories.isEmpty {
+                        Divider()
+                            .padding(.top, 8)
+                        ContentUnavailableView(
+                            searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No Memories" : "No Matches",
+                            systemImage: "brain",
+                            description: Text("Add personal context, preferences, project facts, or writing style notes.")
                         )
-                        .padding(.vertical, 10)
-
-                        Divider()
-
-                        settingsRow("Saved Memories") {
-                            Stepper(
-                                value: Binding(
-                                    get: { appModel.settings.memoryLimit },
-                                    set: {
-                                        appModel.settings.memoryLimit = AppSettings.normalizedMemoryLimit($0)
-                                        appModel.saveSettings()
-                                    }
-                                ),
-                                in: 10...500,
-                                step: 10
-                            ) {
-                                Text("\(appModel.settings.memoryLimit)")
-                                    .monospacedDigit()
-                            }
-                            .frame(maxWidth: 180, alignment: .leading)
-                        }
-
-                        Divider()
-
-                        Text("Memories are stored locally in Application Support and injected only as compact context when they match a command selection.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
-                    }
-                }
-
-                settingsSection(title: "Data") {
-                    settingsGroup {
-                        HStack(spacing: 10) {
-                            Button {
-                                editingMemory = nil
-                                isShowingMemoryEditor = true
-                            } label: {
-                                Label("Add Memory", systemImage: "plus")
-                            }
-
-                            Button("Delete All Memories", role: .destructive) {
-                                showingDeleteConfirmation = true
-                            }
-                            .disabled(appModel.memoryEntries.isEmpty)
-
-                            Spacer()
-                        }
-                        .padding(.vertical, 10)
-                    }
-                }
-
-                settingsSection(title: "Saved Memories") {
-                    settingsGroup {
-                        TextField("Search memories", text: $searchText)
-                            .textFieldStyle(.roundedBorder)
-                            .padding(.vertical, 10)
-
-                        if filteredMemories.isEmpty {
+                        .frame(maxWidth: .infinity)
+                        .padding(.vertical, 24)
+                    } else {
+                        ForEach(filteredMemories) { memory in
                             Divider()
-                            ContentUnavailableView(
-                                searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "No Memories" : "No Matches",
-                                systemImage: "brain",
-                                description: Text("Add personal context, preferences, project facts, or writing style notes.")
+                                .padding(.top, 4)
+                            MemoryRow(
+                                memory: memory,
+                                onEdit: {
+                                    editingMemory = memory
+                                    isShowingMemoryEditor = true
+                                },
+                                onDelete: {
+                                    appModel.deleteMemory(id: memory.id)
+                                }
                             )
-                            .frame(maxWidth: .infinity)
-                            .padding(.vertical, 24)
-                        } else {
-                            ForEach(filteredMemories) { memory in
-                                Divider()
-                                MemoryRow(
-                                    memory: memory,
-                                    onEdit: {
-                                        editingMemory = memory
-                                        isShowingMemoryEditor = true
-                                    },
-                                    onDelete: {
-                                        appModel.deleteMemory(id: memory.id)
-                                    }
-                                )
-                            }
                         }
                     }
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
         }
         .sheet(isPresented: $isShowingMemoryEditor) {
             MemoryEditorSheet(appModel: appModel, memory: editingMemory)
@@ -903,36 +1127,50 @@ private struct MemoryRow: View {
     var onDelete: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: memory.source == .chat ? "bubble.left.and.text.bubble.right" : "command")
+        HStack(alignment: .top, spacing: 12) {
+            Image(systemName: memory.source == .chat ? "bubble.left.and.text.bubble.right" : "command")
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Color.primary.opacity(0.05))
+                )
+                .padding(.top, 2)
+
+            VStack(alignment: .leading, spacing: 4) {
+                Text(memory.title)
+                    .font(.headline)
+                    .lineLimit(1)
+
+                Text(memory.summary)
+                    .font(.subheadline)
                     .foregroundStyle(.secondary)
-                    .frame(width: 18)
+                    .lineLimit(3)
 
-                VStack(alignment: .leading, spacing: 5) {
-                    Text(memory.title)
-                        .font(.headline)
-                        .lineLimit(1)
-
-                    Text(memory.summary)
-                        .font(.subheadline)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(3)
-
-                    HStack(spacing: 8) {
-                        Text(memory.source.rawValue)
-                        Text(memory.updatedAt.formatted(.dateTime.month().day().hour().minute()))
-                    }
-                    .font(.caption)
-                    .foregroundStyle(.tertiary)
+                HStack(spacing: 8) {
+                    Text(memory.source.rawValue)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(
+                            Capsule(style: .continuous)
+                                .fill(Color.primary.opacity(0.05))
+                        )
+                    Text(memory.updatedAt.formatted(.dateTime.month().day().hour().minute()))
                 }
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .padding(.top, 2)
+            }
 
-                Spacer()
+            Spacer()
 
+            HStack(spacing: 8) {
                 Button {
                     onEdit()
                 } label: {
                     Image(systemName: "pencil")
+                        .foregroundStyle(.secondary)
                 }
                 .buttonStyle(.borderless)
                 .help("Edit memory")
@@ -945,8 +1183,9 @@ private struct MemoryRow: View {
                 .buttonStyle(.borderless)
                 .help("Delete memory")
             }
+            .padding(.top, 2)
         }
-        .padding(.vertical, 12)
+        .padding(.vertical, 10)
     }
 }
 
@@ -974,42 +1213,53 @@ private struct MemoryEditorSheet: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
-            Text(memory == nil ? "Add Memory" : "Edit Memory")
-                .font(.title2.weight(.semibold))
+            VStack(alignment: .leading, spacing: 4) {
+                Text(memory == nil ? "Add Memory" : "Edit Memory")
+                    .font(.title2.weight(.semibold))
 
-            Text(source == .chat ? "Source: Saved conversation" : "Source: AI Command")
-                .font(.caption)
-                .foregroundStyle(.secondary)
-
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Title")
+                Text(source == .chat ? "Source: Saved conversation" : "Source: AI Command")
                     .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Title")
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 TextField("Short label", text: $title)
                     .textFieldStyle(.roundedBorder)
             }
 
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 Text("Memory")
-                    .font(.caption)
+                    .font(.caption.weight(.medium))
                     .foregroundStyle(.secondary)
                 TextEditor(text: $summary)
                     .font(.body)
+                    .padding(6)
                     .frame(minHeight: 160)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .fill(Color(nsColor: .textBackgroundColor))
+                    )
                     .overlay(
-                        RoundedRectangle(cornerRadius: 6)
-                            .stroke(Color.secondary.opacity(0.25), lineWidth: 1)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .strokeBorder(Color(nsColor: .separatorColor).opacity(0.7), lineWidth: 0.75)
                     )
             }
+
+            Divider()
 
             HStack {
                 Spacer()
                 Button("Cancel") {
                     dismiss()
                 }
+                .keyboardShortcut(.cancelAction)
                 Button("Save") {
                     save()
                 }
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.defaultAction)
                 .disabled(!canSave)
             }
@@ -1033,84 +1283,84 @@ private struct ClipboardHistorySettingsView: View {
     @State private var showingDeleteAllConfirmation = false
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 28) {
-                settingsSection(title: "Retention") {
-                    settingsGroup {
-                        settingsRow("Saved History") {
-                            Picker(
-                                "",
-                                selection: Binding(
-                                    get: { appModel.settings.clipboardHistoryRetention },
-                                    set: { retention in
-                                        appModel.settings.clipboardHistoryRetention = retention
-                                        appModel.saveSettings()
-                                        appModel.pruneClipboardHistoryForCurrentRetention()
-                                    }
-                                )
-                            ) {
-                                ForEach(ClipboardHistoryRetention.allCases) { retention in
-                                    Text(retention.displayName).tag(retention)
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: "Clipboard History",
+                subtitle: "Configure local retention period, stored entries, and quick-open shortcut."
+            )
+
+            settingsSection(title: "Retention") {
+                settingsGroup {
+                    settingsRow("Saved History") {
+                        Picker(
+                            "",
+                            selection: Binding(
+                                get: { appModel.settings.clipboardHistoryRetention },
+                                set: { retention in
+                                    appModel.settings.clipboardHistoryRetention = retention
+                                    appModel.saveSettings()
+                                    appModel.pruneClipboardHistoryForCurrentRetention()
                                 }
+                            )
+                        ) {
+                            ForEach(ClipboardHistoryRetention.allCases) { retention in
+                                Text(retention.displayName).tag(retention)
                             }
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: 220, alignment: .leading)
                         }
-
-                        Divider()
-
-                        Text("Clipboard history is persisted locally and pruned automatically based on the selected retention window.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .frame(maxWidth: 220, alignment: .leading)
                     }
+
+                    Divider()
+
+                    Text("Clipboard history is persisted locally and pruned automatically based on the selected retention window.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.top, 10)
+                        .padding(.bottom, 2)
                 }
+            }
 
-                settingsSection(title: "Data") {
-                    settingsGroup {
-                        HStack(spacing: 10) {
-                            Button("Delete All History", role: .destructive) {
-                                showingDeleteAllConfirmation = true
+            settingsSection(title: "Shortcut") {
+                settingsGroup {
+                    settingsRow("Global Shortcut", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ShortcutRecorderField(
+                                shortcut: appModel.settings.clipboardHistoryShortcut,
+                                hasConflict: appModel.hotKeyConflicts.contains(AppModel.clipboardHistoryShortcutID)
+                            ) { shortcut in
+                                appModel.settings.clipboardHistoryShortcut = shortcut
+                                appModel.saveSettings(reloadHotKeys: true)
                             }
-                            .disabled(appModel.clipboardHistoryEntries.isEmpty)
 
-                            Spacer()
-                        }
-
-                        Divider()
-
-                        Text("This permanently deletes all saved clipboard history on this Mac.")
-                            .font(.subheadline)
-                            .foregroundStyle(.secondary)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                            .padding(.vertical, 10)
-                    }
-                }
-
-                settingsSection(title: "Shortcut") {
-                    settingsGroup {
-                        settingsRow("Global Shortcut") {
-                            VStack(alignment: .leading, spacing: 8) {
-                                ShortcutRecorderField(
-                                    shortcut: appModel.settings.clipboardHistoryShortcut,
-                                    hasConflict: appModel.hotKeyConflicts.contains(AppModel.clipboardHistoryShortcutID)
-                                ) { shortcut in
-                                    appModel.settings.clipboardHistoryShortcut = shortcut
-                                    appModel.saveSettings(reloadHotKeys: true)
-                                }
-
-                                Text("Use a global shortcut to open the Clipboard History window from anywhere.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            Text("Use a global shortcut to open the Clipboard History window from anywhere.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
                         }
                     }
                 }
             }
-            .padding(.horizontal, 28)
-            .padding(.top, 28)
-            .padding(.bottom, 32)
+
+            settingsSection(title: "Data") {
+                settingsGroup {
+                    settingsRow("Local History") {
+                        HStack(spacing: 10) {
+                            Text("Permanently removes all saved clipboard entries on this Mac.")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Spacer()
+
+                            Button("Delete All History", role: .destructive) {
+                                showingDeleteAllConfirmation = true
+                            }
+                            .disabled(appModel.clipboardHistoryEntries.isEmpty)
+                        }
+                    }
+                }
+            }
         }
         .task {
             await appModel.loadClipboardHistoryIfNeeded()
@@ -1133,7 +1383,7 @@ private struct CommandsSettingsView: View {
     var body: some View {
         HSplitView {
             commandListColumn
-                .frame(minWidth: 240, idealWidth: 250, maxWidth: 280)
+                .frame(minWidth: 235, idealWidth: 255, maxWidth: 290)
 
             Group {
                 if let index = selectedCommandIndex {
@@ -1142,7 +1392,7 @@ private struct CommandsSettingsView: View {
                     ContentUnavailableView(
                         "Select a Command",
                         systemImage: "command.square",
-                        description: Text("Choose a command in the sidebar to edit its behavior.")
+                        description: Text("Choose a command in the list to edit its prompt, model, and shortcut.")
                     )
                 }
             }
@@ -1153,7 +1403,7 @@ private struct CommandsSettingsView: View {
     private var commandListColumn: some View {
         VStack(spacing: 0) {
             HStack(spacing: 8) {
-                Text("Commands")
+                Text("AI Commands")
                     .font(.headline)
 
                 Spacer()
@@ -1179,6 +1429,7 @@ private struct CommandsSettingsView: View {
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
+
             Divider()
 
             List(selection: commandSelectionBinding) {
@@ -1186,6 +1437,7 @@ private struct CommandsSettingsView: View {
                     CommandListRow(
                         command: command,
                         hasConflict: appModel.hotKeyConflicts.contains(command.id)
+                            || appModel.duplicateCommandIdentifiers.contains(command.id)
                     )
                     .tag(command.id)
                 }
@@ -1212,13 +1464,168 @@ private struct CommandsSettingsView: View {
     }
 }
 
+// MARK: - Shared macOS 27 Native Settings Components
+
+struct SettingsPageContainer<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                content()
+            }
+            .frame(maxWidth: 780, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .center)
+            .padding(.horizontal, 28)
+            .padding(.top, 20)
+            .padding(.bottom, 36)
+        }
+    }
+}
+
+struct SettingsPageHeader<Trailing: View>: View {
+    let title: String
+    let subtitle: String
+    @ViewBuilder let trailing: () -> Trailing
+
+    init(
+        title: String,
+        subtitle: String,
+        @ViewBuilder trailing: @escaping () -> Trailing = { EmptyView() }
+    ) {
+        self.title = title
+        self.subtitle = subtitle
+        self.trailing = trailing
+    }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(title)
+                    .font(.system(size: 24, weight: .bold))
+                Text(subtitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+            }
+
+            Spacer(minLength: 12)
+
+            trailing()
+        }
+        .padding(.bottom, 2)
+    }
+}
+
+struct SettingsStatusPill: View {
+    let text: String
+    let color: Color
+
+    @Environment(\.appearsActive) private var appearsActive
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Circle()
+                .fill(color)
+                .frame(width: 7, height: 7)
+            Text(text)
+                .font(.caption.weight(.medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 4)
+        .background(
+            Capsule(style: .continuous)
+                .fill(color.opacity(appearsActive ? 0.13 : 0.08))
+        )
+        .foregroundStyle(appearsActive ? .primary : .secondary)
+    }
+}
+
+struct SettingsSearchField: View {
+    let placeholder: String
+    @Binding var text: String
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+
+            TextField(placeholder, text: $text)
+                .textFieldStyle(.plain)
+
+            if !text.isEmpty {
+                Button {
+                    text = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundStyle(.tertiary)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel("Clear search")
+            }
+        }
+        .padding(.horizontal, 9)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(Color(nsColor: .textBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+        )
+    }
+}
+
+struct SettingsKeycapBadge: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.system(.caption2, design: .rounded, weight: .medium))
+            .monospacedDigit()
+            .foregroundStyle(.secondary)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .fill(Color.primary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5, style: .continuous)
+                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.45), lineWidth: 0.5)
+            )
+    }
+}
+
 func settingsSection<Content: View>(
     title: String,
     @ViewBuilder content: () -> Content
 ) -> some View {
-    VStack(alignment: .leading, spacing: 12) {
+    VStack(alignment: .leading, spacing: 8) {
         Text(title)
-            .font(.title3.weight(.semibold))
+            .font(.headline)
+            .padding(.leading, 4)
+        content()
+    }
+}
+
+func settingsSection<Trailing: View, Content: View>(
+    title: String,
+    @ViewBuilder trailing: () -> Trailing,
+    @ViewBuilder content: () -> Content
+) -> some View {
+    VStack(alignment: .leading, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
+            Text(title)
+                .font(.headline)
+                .padding(.leading, 4)
+            Spacer()
+            trailing()
+        }
         content()
     }
 }
@@ -1229,26 +1636,33 @@ func settingsGroup<Content: View>(
     VStack(alignment: .leading, spacing: 0) {
         content()
     }
-    .padding(.horizontal, 20)
-    .padding(.vertical, 14)
+    .padding(.horizontal, 16)
+    .padding(.vertical, 12)
     .background(
-        RoundedRectangle(cornerRadius: 16, style: .continuous)
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
             .fill(Color(nsColor: .controlBackgroundColor))
+    )
+    .overlay(
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
     )
 }
 
 func settingsRow<Content: View>(
     _ label: String,
+    alignment: VerticalAlignment = .center,
     @ViewBuilder content: () -> Content
 ) -> some View {
-    HStack(alignment: .center, spacing: 24) {
+    HStack(alignment: alignment, spacing: 20) {
         Text(label)
-            .frame(width: 180, alignment: .leading)
+            .font(.body)
+            .frame(width: 176, alignment: .leading)
+            .padding(.top, alignment == .top ? 2 : 0)
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
-    .padding(.vertical, 10)
+    .padding(.vertical, 8)
 }
 
 private struct CommandListRow: View {
@@ -1256,28 +1670,34 @@ private struct CommandListRow: View {
     let hasConflict: Bool
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack(spacing: 6) {
-                Text(command.title)
-                    .lineLimit(1)
+        HStack(alignment: .center, spacing: 8) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 5) {
+                    Text(command.title)
+                        .font(.body.weight(.medium))
+                        .lineLimit(1)
 
-                if hasConflict {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                        .help("This shortcut conflicts with another command.")
+                    if hasConflict {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.caption)
+                            .foregroundStyle(.orange)
+                            .help("This command has a shortcut or ID conflict.")
+                    }
                 }
-            }
 
-            HStack(spacing: 8) {
                 Text(command.commandID)
-                if let shortcut = command.shortcut {
-                    Text(shortcut.displayString)
-                }
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
+
+            Spacer(minLength: 4)
+
+            if let shortcut = command.shortcut {
+                SettingsKeycapBadge(text: shortcut.displayString)
+            }
         }
-        .padding(.vertical, 3)
+        .padding(.vertical, 4)
     }
 }
 
@@ -1290,129 +1710,207 @@ private struct CommandEditorView: View {
     }
 
     var body: some View {
-        Form {
-            Section {
-                Text(command.title)
-                    .font(.title2.weight(.semibold))
-                Text("Edit prompt behavior, output handling, and global shortcut.")
-                    .foregroundStyle(.secondary)
-            }
+        SettingsPageContainer {
+            SettingsPageHeader(
+                title: command.title.isEmpty ? "Untitled Command" : command.title,
+                subtitle: "Edit prompt behavior, model selection, output handling, and global shortcut."
+            )
 
-            Section("Identity") {
-                TextField("Command ID", text: binding(\.commandID))
+            settingsSection(title: "Identity") {
+                settingsGroup {
+                    settingsRow("Command ID", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            TextField("Command ID", text: binding(\.commandID))
+                                .textFieldStyle(.roundedBorder)
 
-                if appModel.duplicateCommandIdentifiers.contains(command.id) {
-                    Label("This ID is duplicated. Keep command IDs unique.", systemImage: "exclamationmark.triangle.fill")
-                        .foregroundStyle(.yellow)
-                }
-
-                TextField("Command Title", text: binding(\.title))
-            }
-
-            Section("Shortcut") {
-                ShortcutRecorderField(
-                    shortcut: command.shortcut,
-                    hasConflict: appModel.hotKeyConflicts.contains(command.id)
-                ) { shortcut in
-                    appModel.settings.commands[commandIndex].shortcut = shortcut
-                    appModel.saveSettings(reloadHotKeys: true)
-                }
-            }
-
-            Section("Model") {
-                Toggle(
-                    "Use default model",
-                    isOn: Binding(
-                        get: { command.resolvedModel == nil },
-                        set: { useDefault in
-                            appModel.settings.commands[commandIndex].modelOverride = useDefault ? nil : appModel.settings.defaultModel
-                            appModel.saveSettings()
-                        }
-                    )
-                )
-
-                if command.resolvedModel != nil {
-                    Picker(
-                        "Override Model",
-                        selection: Binding(
-                            get: { appModel.settings.commands[commandIndex].modelOverride ?? appModel.settings.defaultModel },
-                            set: {
-                                appModel.settings.commands[commandIndex].modelOverride = $0
-                                appModel.saveSettings()
+                            if appModel.duplicateCommandIdentifiers.contains(command.id) {
+                                Label("This ID is duplicated. Keep command IDs unique.", systemImage: "exclamationmark.triangle.fill")
+                                    .font(.caption)
+                                    .foregroundStyle(.orange)
                             }
-                        )
-                    ) {
-                        ForEach(availableModels, id: \.self) { model in
-                            Text(model).tag(model)
+                        }
+                    }
+
+                    Divider()
+
+                    settingsRow("Command Title") {
+                        TextField("Command Title", text: binding(\.title))
+                            .textFieldStyle(.roundedBorder)
+                    }
+                }
+            }
+
+            settingsSection(title: "Shortcut") {
+                settingsGroup {
+                    settingsRow("Global Shortcut", alignment: .top) {
+                        ShortcutRecorderField(
+                            shortcut: command.shortcut,
+                            hasConflict: appModel.hotKeyConflicts.contains(command.id)
+                        ) { shortcut in
+                            appModel.settings.commands[commandIndex].shortcut = shortcut
+                            appModel.saveSettings(reloadHotKeys: true)
                         }
                     }
                 }
+            }
 
-                Toggle("Use default reasoning", isOn: binding(\.useDefaultReasoning))
-                if command.useDefaultReasoning {
-                    Text("Default: \(appModel.defaultReasoningMode(for: command.effectiveModel(defaultModel: appModel.settings.defaultModel)).displayName)")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-                Picker("Reasoning", selection: reasoningModeBinding) {
-                    ForEach(availableReasoningModes) { mode in
-                        Text(mode.displayName).tag(mode)
+            settingsSection(title: "Model & Reasoning") {
+                settingsGroup {
+                    settingsRow("Model", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle(
+                                "Use default model",
+                                isOn: Binding(
+                                    get: { command.resolvedModel == nil },
+                                    set: { useDefault in
+                                        appModel.settings.commands[commandIndex].modelOverride = useDefault ? nil : appModel.settings.defaultModel
+                                        appModel.saveSettings()
+                                    }
+                                )
+                            )
+
+                            if command.resolvedModel != nil {
+                                Picker(
+                                    "",
+                                    selection: Binding(
+                                        get: { appModel.settings.commands[commandIndex].modelOverride ?? appModel.settings.defaultModel },
+                                        set: {
+                                            appModel.settings.commands[commandIndex].modelOverride = $0
+                                            appModel.saveSettings()
+                                        }
+                                    )
+                                ) {
+                                    ForEach(availableModels, id: \.self) { model in
+                                        Text(model).tag(model)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .labelsHidden()
+                                .frame(maxWidth: 340, alignment: .leading)
+                            }
+                        }
+                    }
+
+                    Divider()
+
+                    settingsRow("Reasoning", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Use default reasoning", isOn: binding(\.useDefaultReasoning))
+
+                            if command.useDefaultReasoning {
+                                Text("Default: \(appModel.defaultReasoningMode(for: command.effectiveModel(defaultModel: appModel.settings.defaultModel)).displayName)")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+
+                            Picker("", selection: reasoningModeBinding) {
+                                ForEach(availableReasoningModes) { mode in
+                                    Text(mode.displayName).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .frame(maxWidth: 220, alignment: .leading)
+                            .disabled(command.useDefaultReasoning)
+                            .help("Auto uses the provider default. Available effort levels depend on the selected model.")
+                        }
                     }
                 }
-                .disabled(command.useDefaultReasoning)
-                .help("Auto uses the provider default. Available effort levels depend on the selected model.")
             }
 
-            Section("Output") {
-                Toggle("Show popup after completion", isOn: binding(\.showPopup))
-                Toggle("Save to Obsidian", isOn: binding(\.saveToObsidian))
-                if command.saveToObsidian {
-                    TextField(
-                        "Obsidian Vault Name or Path",
-                        text: Binding(
-                            get: { appModel.settings.obsidianVaultName },
-                            set: {
-                                appModel.settings.obsidianVaultName = $0
-                                appModel.saveSettings()
+            settingsSection(title: "Output") {
+                settingsGroup {
+                    settingsRow("Completion", alignment: .top) {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Show popup after completion", isOn: binding(\.showPopup))
+                            Toggle("Save to Obsidian", isOn: binding(\.saveToObsidian))
+                        }
+                    }
+
+                    if command.saveToObsidian {
+                        Divider()
+
+                        settingsRow("Obsidian Vault") {
+                            TextField(
+                                "Obsidian Vault Name or Path",
+                                text: Binding(
+                                    get: { appModel.settings.obsidianVaultName },
+                                    set: {
+                                        appModel.settings.obsidianVaultName = $0
+                                        appModel.saveSettings()
+                                    }
+                                )
+                            )
+                            .textFieldStyle(.roundedBorder)
+                        }
+
+                        Divider()
+
+                        settingsRow("Note Subfolder", alignment: .top) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                TextField(
+                                    "Optional subfolder",
+                                    text: Binding(
+                                        get: { appModel.settings.obsidianSubfolder },
+                                        set: {
+                                            appModel.settings.obsidianSubfolder = $0
+                                            appModel.saveSettings()
+                                        }
+                                    )
+                                )
+                                .textFieldStyle(.roundedBorder)
+
+                                Text("Writes Markdown directly to the local Vault folder in the background without stealing focus, falling back to obsidian:// when needed.")
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
                             }
-                        )
-                    )
-                    TextField(
-                        "Note Subfolder (Optional)",
-                        text: Binding(
-                            get: { appModel.settings.obsidianSubfolder },
-                            set: {
-                                appModel.settings.obsidianSubfolder = $0
-                                appModel.saveSettings()
-                            }
-                        )
-                    )
-                    Text("Writes Markdown directly to the local Vault folder in the background without stealing focus, falling back to obsidian:// when needed.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
+                        }
+                    }
                 }
             }
 
-            Section {
-                Text("Supports runtime context variables injected before sending the prompt.")
-                    .foregroundStyle(.secondary)
+            settingsSection(title: "Prompt Template") {
+                settingsGroup {
+                    VStack(alignment: .leading, spacing: 10) {
+                        Text("Click a variable to append it to the prompt template.")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
 
-                FlowLayout(spacing: 8) {
-                    TokenChip(label: "{{text}}")
-                    TokenChip(label: "{{command_title}}")
-                    TokenChip(label: "{{app_name}}")
-                    TokenChip(label: "{{clipboard}}")
-                    TokenChip(label: "{{date}}")
+                        FlowLayout(spacing: 6) {
+                            ForEach(["{{text}}", "{{command_title}}", "{{app_name}}", "{{clipboard}}", "{{date}}"], id: \.self) { token in
+                                TokenChip(label: token) {
+                                    insertToken(token)
+                                }
+                            }
+                        }
+
+                        TextEditor(text: binding(\.promptTemplate))
+                            .font(.system(.body, design: .monospaced))
+                            .padding(8)
+                            .frame(minHeight: 240)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(Color(nsColor: .textBackgroundColor))
+                            )
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+                            )
+                    }
+                    .padding(.vertical, 4)
                 }
-
-                TextEditor(text: binding(\.promptTemplate))
-                    .font(.system(.body, design: .monospaced))
-                    .frame(minHeight: 280)
-            } header: {
-                Text("Prompt Template")
             }
         }
-        .formStyle(.grouped)
+    }
+
+    private func insertToken(_ token: String) {
+        let current = appModel.settings.commands[commandIndex].promptTemplate
+        if current.isEmpty || current.hasSuffix(" ") || current.hasSuffix("\n") {
+            appModel.settings.commands[commandIndex].promptTemplate = current + token
+        } else {
+            appModel.settings.commands[commandIndex].promptTemplate = current + " " + token
+        }
+        appModel.saveSettings()
     }
 
     private func binding<Value>(_ keyPath: WritableKeyPath<AICommand, Value>) -> Binding<Value> {
@@ -1446,21 +1944,51 @@ private struct CommandEditorView: View {
             }
         )
     }
-
 }
 
 private struct TokenChip: View {
     let label: String
+    var onInsert: () -> Void
+
+    @State private var isHovering = false
+    @State private var recentlyInserted = false
 
     var body: some View {
-        Text(label)
-            .font(.system(.caption, design: .monospaced))
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
+        Button {
+            onInsert()
+            recentlyInserted = true
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.9) {
+                recentlyInserted = false
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(label)
+                    .font(.system(.caption, design: .monospaced))
+                if recentlyInserted {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundStyle(Color.accentColor)
+                }
+            }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 4)
             .background(
                 Capsule(style: .continuous)
-                    .fill(Color(nsColor: .quaternaryLabelColor).opacity(0.12))
+                    .fill(isHovering ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.055))
             )
+            .overlay(
+                Capsule(style: .continuous)
+                    .strokeBorder(
+                        isHovering ? Color.accentColor.opacity(0.35) : Color(nsColor: .separatorColor).opacity(0.45),
+                        lineWidth: 0.5
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .onHover { hovering in
+            isHovering = hovering
+        }
+        .help("Click to append \(label) to prompt")
     }
 }
 
