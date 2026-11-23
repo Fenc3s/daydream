@@ -302,6 +302,7 @@ actor ClipboardHistoryStore {
         withDatabase { db in
             sqlite3_exec(db, "DELETE FROM clipboard_history_payload;", nil, nil, nil)
             sqlite3_exec(db, "DELETE FROM clipboard_history_summary;", nil, nil, nil)
+            cleanupOrphanedPayloadsAndVacuumIfNeeded(db: db, forceVacuum: true)
         }
     }
 
@@ -314,6 +315,36 @@ actor ClipboardHistoryStore {
             defer { sqlite3_finalize(statement) }
             sqlite3_bind_double(statement, 1, cutoffDate.timeIntervalSince1970)
             sqlite3_step(statement)
+            cleanupOrphanedPayloadsAndVacuumIfNeeded(db: db)
+        }
+    }
+
+    private func cleanupOrphanedPayloadsAndVacuumIfNeeded(db: OpaquePointer?, forceVacuum: Bool = false) {
+        guard let db else { return }
+        sqlite3_exec(
+            db,
+            "DELETE FROM clipboard_history_payload WHERE id NOT IN (SELECT id FROM clipboard_history_summary);",
+            nil,
+            nil,
+            nil
+        )
+        let shouldVacuum: Bool
+        if forceVacuum {
+            shouldVacuum = true
+        } else if let statement = prepareStatement(db, sql: "PRAGMA freelist_count;") {
+            defer { sqlite3_finalize(statement) }
+            if sqlite3_step(statement) == SQLITE_ROW {
+                shouldVacuum = sqlite3_column_int64(statement, 0) >= 2_500
+            } else {
+                shouldVacuum = false
+            }
+        } else {
+            shouldVacuum = false
+        }
+
+        if shouldVacuum {
+            sqlite3_exec(db, "VACUUM;", nil, nil, nil)
+            sqlite3_exec(db, "PRAGMA wal_checkpoint(TRUNCATE);", nil, nil, nil)
         }
     }
 
@@ -367,6 +398,7 @@ actor ClipboardHistoryStore {
 
             configureFTSIndexIfSupported(db: db)
             migrateLegacyJSONIfNeeded(db: db)
+            cleanupOrphanedPayloadsAndVacuumIfNeeded(db: db)
         }
     }
 

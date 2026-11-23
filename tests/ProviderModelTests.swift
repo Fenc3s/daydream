@@ -85,46 +85,7 @@ struct ProviderModelTests {
         defer { try? FileManager.default.removeItem(at: testLoggerDir) }
         let client = AIClient(logger: AppLogger(directory: testLoggerDir, maxLogFileBytes: 1_500))
         let testURL = ProcessInfo.processInfo.environment["DAYDREAM_TEST_URL"] ?? "http://127.0.0.1:18765/v1"
-        let bundledCapabilities = VerifiedReasoningCapability.bundled()
-        check(bundledCapabilities.isEmpty, "Bundled capabilities snapshot starts empty")
-        let checkedAt = ISO8601DateFormatter().string(from: Date())
-        let cached = VerifiedReasoningCapability(efforts: [.low, .high], checkedAt: checkedAt, endpoint: testURL, status: "verified")
-        check(cached.isFresh(for: testURL + "/"), "Normalize cache endpoint trailing slash")
-        var legacyCacheObject = try JSONSerialization.jsonObject(with: encoder.encode(cached)) as! [String: Any]
-        legacyCacheObject.removeValue(forKey: "discoveryVersion")
-        let legacyCache = try decoder.decode(VerifiedReasoningCapability.self, from: JSONSerialization.data(withJSONObject: legacyCacheObject))
-        check(!legacyCache.isFresh(for: testURL), "Refresh legacy caches that never tested None")
-        check(!cached.isFresh(for: "https://other.example/v1"), "Do not reuse checks across endpoints")
-        check(!cached.isFresh(for: testURL, now: Date().addingTimeInterval(8 * 24 * 60 * 60)), "Expire checks after seven days")
-        var fractionalCache = cached
-        let fractionalFormatter = ISO8601DateFormatter()
-        fractionalFormatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        fractionalCache.checkedAt = fractionalFormatter.string(from: Date().addingTimeInterval(-1))
-        check(fractionalCache.isFresh(for: testURL), "Read snapshot timestamps with fractional seconds")
-        var blockedCache = cached
-        blockedCache.status = "region_blocked"
-        check(!blockedCache.isFresh(for: testURL, now: Date().addingTimeInterval(16 * 60)), "Retry unavailable checks after fifteen minutes")
-        defaults.verifiedReasoningCapabilities = [AIProvider.openRouter.rawValue: ["cached-model": cached]]
-        let cachedRoundTrip = try decoder.decode(AppSettings.self, from: encoder.encode(defaults))
-        check(cachedRoundTrip.verifiedReasoningCapabilities == defaults.verifiedReasoningCapabilities, "Persist verified capability cache")
-        let cacheDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        let cacheURL = cacheDirectory.appendingPathComponent("verified-reasoning.json")
-        VerifiedReasoningCapability.store(["cached-model": cached], at: cacheURL)
-        check(VerifiedReasoningCapability.stored(at: cacheURL)["cached-model"] == cached, "Keep verification cache independent of synced settings")
-        try? FileManager.default.removeItem(at: cacheDirectory)
         if CommandLine.arguments.contains("--requests") {
-            let discovered = await ReasoningCapabilityDiscovery.discover(model: "discovery-supported", baseURL: testURL, apiKey: "")
-            check(discovered.status == "verified" && discovered.efforts == [.low, .high], "Discover supported efforts with streaming positive and negative controls")
-            let supportsNone = await ReasoningCapabilityDiscovery.discover(model: "discovery-none", baseURL: testURL, apiKey: "")
-            check(supportsNone.efforts == [.noEffort, .low, .high], "Fetch probes None only as a supported explicit effort")
-            check(ModelReasoning.modes(provider: .deepSeek, model: "discovery-none", capability: .init(supportedEfforts: supportsNone.efforts.map(\.rawValue))) == [.modelDefault, .noEffort, .low, .high], "Settings and menu share the verified per-model choices")
-            let ignored = await ReasoningCapabilityDiscovery.discover(model: "discovery-ignored", baseURL: testURL, apiKey: "")
-            check(ignored.status == "parameter_not_validated" && ignored.efforts.isEmpty, "Do not mistake silently ignored fields for support")
-            let blocked = await ReasoningCapabilityDiscovery.discover(model: "discovery-blocked", baseURL: testURL, apiKey: "")
-            check(blocked.status == "region_blocked" && blocked.efforts.isEmpty, "Do not classify regional restrictions as unsupported reasoning")
-            let media = await ReasoningCapabilityDiscovery.discover(model: "discovery-media", baseURL: testURL, apiKey: "")
-            check(media.status == "streaming_unverified" && media.efforts.isEmpty, "Exclude media responses from text command verification")
-
             for provider in AIProvider.allCases {
                 for mode in [ReasoningMode.modelDefault, .noEffort, .low, .high] {
                     _ = try await client.generateText(provider: provider,
@@ -140,7 +101,10 @@ struct ProviderModelTests {
         }
 
         let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: settingsDirectory) }
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(settingsDirectory.lastPathComponent)")
+            try? FileManager.default.removeItem(at: settingsDirectory)
+        }
         let preferenceStore = SettingsStore(directory: settingsDirectory)
         var modelSettings = AppSettings.default
         modelSettings.providerModelCatalogs[AIProvider.openRouter.rawValue] = ["model-a", "model-b"]
@@ -185,7 +149,10 @@ struct ProviderModelTests {
         let testKeychain = KeychainStore(service: keychainService)
         defer { testKeychain.removeAll() }
         let secretDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: secretDir) }
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(secretDir.lastPathComponent)")
+            try? FileManager.default.removeItem(at: secretDir)
+        }
         try FileManager.default.createDirectory(at: secretDir, withIntermediateDirectories: true)
         let rawLegacySettings: [String: Any] = [
             "apiKey": "test-api-secret",
@@ -200,8 +167,10 @@ struct ProviderModelTests {
         check(migratedSecrets.openRouterAPIKey == "test-or-secret", "Migrate OpenRouter API key to Keychain")
         check(migratedSecrets.deepSeekAPIKey == "test-ds-secret", "Migrate DeepSeek API key to Keychain")
         check(testKeychain.string(for: .openRouterAPIKey) == "test-or-secret", "Persist migrated secret in macOS Keychain")
-        let scrubbedJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: secretSettingsURL)) as! [String: Any]
-        check(scrubbedJSON["apiKey"] == nil && scrubbedJSON["openRouterAPIKey"] == nil && scrubbedJSON["deepSeekAPIKey"] == nil && scrubbedJSON["tavilyAPIKey"] == nil, "Scrub all API keys from settings.json on disk")
+        check(!FileManager.default.fileExists(atPath: secretSettingsURL.path), "Remove legacy settings.json after migrating to UserDefaults plist")
+        let storedPlistData = keychainSettingsStore.storedSettingsDataForTesting()!
+        let scrubbedJSON = try JSONSerialization.jsonObject(with: storedPlistData) as! [String: Any]
+        check(scrubbedJSON["apiKey"] == nil && scrubbedJSON["openRouterAPIKey"] == nil && scrubbedJSON["deepSeekAPIKey"] == nil && scrubbedJSON["tavilyAPIKey"] == nil, "Scrub all API keys from UserDefaults plist storage")
         let reloadedFromKeychain = SettingsStore(directory: secretDir, credentialStore: testKeychain).load()
         check(reloadedFromKeychain.openRouterAPIKey == "test-or-secret" && reloadedFromKeychain.deepSeekAPIKey == "test-ds-secret", "Restore API keys from Keychain on restart")
         migratedSecrets.openRouterAPIKey = ""
@@ -210,7 +179,10 @@ struct ProviderModelTests {
 
         // Verify corrupted settings.json is backed up and never overwritten with defaults.
         let corruptDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: corruptDir) }
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(corruptDir.lastPathComponent)")
+            try? FileManager.default.removeItem(at: corruptDir)
+        }
         try FileManager.default.createDirectory(at: corruptDir, withIntermediateDirectories: true)
         let corruptURL = corruptDir.appendingPathComponent("settings.json")
         let corruptPayload = Data("{ broken json".utf8)
@@ -395,10 +367,12 @@ struct ProviderModelTests {
             "Normalize app input source rules by trimming, dropping invalid/self entries, falling back appName, and deduplicating in order"
         )
 
-        // Verify SettingsStore local persistence and preservation of uninstalled third-party IME rules.
+        // Verify SettingsStore UserDefaults plist persistence and preservation of uninstalled third-party IME rules.
         let inputStoreDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        defer { try? FileManager.default.removeItem(at: inputStoreDir) }
-        let localInputSettingsURL = inputStoreDir.appendingPathComponent("settings.json")
+        defer {
+            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(inputStoreDir.lastPathComponent)")
+            try? FileManager.default.removeItem(at: inputStoreDir)
+        }
         let localInputStore = SettingsStore(directory: inputStoreDir)
         var localInputSettings = AppSettings.default
         localInputSettings.inputSourceSwitchingEnabled = false
@@ -418,17 +392,17 @@ struct ProviderModelTests {
             ),
         ]
         localInputStore.save(localInputSettings)
-        let rawLocalInputJSON = try JSONSerialization.jsonObject(with: Data(contentsOf: localInputSettingsURL)) as! [String: Any]
+        let rawLocalInputJSON = try JSONSerialization.jsonObject(with: localInputStore.storedSettingsDataForTesting()!) as! [String: Any]
         check(
             rawLocalInputJSON["defaultEnglishInputSourceID"] as? String == "com.apple.keylayout.US" &&
             rawLocalInputJSON["appInputSourceRules"] != nil,
-            "Local settings.json persists defaultEnglishInputSourceID and appInputSourceRules"
+            "UserDefaults plist persists defaultEnglishInputSourceID and appInputSourceRules"
         )
         let reloadedInputStore = SettingsStore(directory: inputStoreDir)
         let reloadedInputSettings = reloadedInputStore.load()
         check(
             reloadedInputSettings.inputSourceSwitchingEnabled == false,
-            "Reloading SettingsStore preserves local inputSourceSwitchingEnabled == false from local-preferences.json"
+            "Reloading SettingsStore preserves inputSourceSwitchingEnabled == false from UserDefaults plist"
         )
         reloadedInputStore.save(reloadedInputSettings)
         let roundTrippedLocalSettings = reloadedInputStore.load()

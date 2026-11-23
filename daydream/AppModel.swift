@@ -50,7 +50,6 @@ final class AppModel {
     var openRouterReasoningCapabilities: [String: OpenRouterReasoningCapability] = [:]
     var discoveredModels: [String: [String]] = [:]
     var modelCapabilities: [String: [String: OpenRouterReasoningCapability]] = [:]
-    var localVerifiedReasoningCapabilities = VerifiedReasoningCapability.localAndBundled()
     var modelCatalogStatus: [String: String] = [:]
     var refreshingModelProviders: Set<String> = []
 
@@ -665,16 +664,9 @@ final class AppModel {
         }
     }
 
-    func verifiedReasoningCapability(for model: String, provider: AIProvider) -> VerifiedReasoningCapability? {
-        nil
-    }
-
     func availableReasoningModes(for model: String, provider: AIProvider? = nil) -> [ReasoningMode] {
         let provider = provider ?? settings.provider
-        let verified = verifiedReasoningCapability(for: model, provider: provider)
-        let reported = modelCapabilities[provider.rawValue]?[model]
-        let capability = reported?.supportedEfforts != nil ? reported
-            : verified.map { OpenRouterReasoningCapability(supportedEfforts: $0.efforts.map(\.rawValue)) } ?? reported
+        let capability = modelCapabilities[provider.rawValue]?[model]
         return ModelReasoning.modes(
             provider: provider,
             model: model,

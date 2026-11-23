@@ -82,7 +82,6 @@ enum ICloudPasswordsAutomationStatus {
     var displayText: String { "Disabled" }
 }
 ''')
-    (folder / "VerifiedReasoningCapabilities.json").write_bytes((ROOT / "daydream/VerifiedReasoningCapabilities.json").read_bytes())
     env = dict(os.environ, DEVELOPER_DIR="/Applications/Xcode.app/Contents/Developer")
     sources = [
         "daydream/Core/Models.swift",
@@ -95,7 +94,6 @@ enum ICloudPasswordsAutomationStatus {
         "daydream/Support/PasteboardSnapshot.swift",
         "daydream/Services/AIClient.swift",
         "daydream/Services/ProviderModelCatalog.swift",
-        "daydream/Services/ReasoningCapabilityDiscovery.swift",
         "daydream/Services/InputSourceSwitchingService.swift",
         "daydream/Services/WindowMoverService.swift",
         "daydream/Services/SettingsStore.swift",

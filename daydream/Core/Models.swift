@@ -8,7 +8,6 @@ struct AppSettings: Codable, Equatable, Sendable {
     var reasoningByModel: [String: ReasoningMode] = [:]
     var reasoningEffortOverrides: [String: [String: [ReasoningMode]]] = [:]
     var defaultReasoningByModel: [String: [String: ReasoningMode]] = [:]
-    var verifiedReasoningCapabilities: [String: [String: VerifiedReasoningCapability]] = [:]
     var openRouterBaseURL: String
     var openRouterAPIKey: String
     var deepSeekBaseURL: String
@@ -89,7 +88,6 @@ struct AppSettings: Codable, Equatable, Sendable {
         case reasoningByModel
         case reasoningEffortOverrides
         case defaultReasoningByModel
-        case verifiedReasoningCapabilities
         case openRouterBaseURL
         case openRouterAPIKey
         case deepSeekBaseURL
@@ -156,7 +154,6 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
-        verifiedReasoningCapabilities = try container.decodeIfPresent([String: [String: VerifiedReasoningCapability]].self, forKey: .verifiedReasoningCapabilities) ?? [:]
         defaultReasoningByModel = try container.decodeIfPresent([String: [String: ReasoningMode]].self, forKey: .defaultReasoningByModel) ?? [:]
         reasoningEffortOverrides = try container.decodeIfPresent([String: [String: [ReasoningMode]]].self, forKey: .reasoningEffortOverrides) ?? [:]
         reasoningByModel = try container.decodeIfPresent([String: ReasoningMode].self, forKey: .reasoningByModel) ?? [:]
