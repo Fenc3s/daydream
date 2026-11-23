@@ -103,6 +103,7 @@ final class AppModel {
     @ObservationIgnored private var lastExternalApplication: ExternalApplicationTarget?
     @ObservationIgnored private var lastClipboardHistoryApplication: ExternalApplicationTarget?
     @ObservationIgnored private var clipboardHistoryTargetApplication: ExternalApplicationTarget?
+    @ObservationIgnored private weak var settingsWindow: NSWindow?
     @ObservationIgnored private var activeCommandTask: Task<Void, Never>?
     @ObservationIgnored private var activeWindowMoveTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatGPTSignInTask: Task<Void, Never>?
@@ -494,20 +495,58 @@ final class AppModel {
 
     // Finalizes the window presentation.
     func finalizeWindowPresentation(matchingTitle title: String) {
-        NSApp.activate(ignoringOtherApps: true)
-        NSRunningApplication.current.activate(options: [.activateAllWindows])
-
         let matchingWindow = NSApp.windows.first { window in
             window.title.localizedCaseInsensitiveContains(title)
         }
-        matchingWindow?.makeKeyAndOrderFront(nil)
-        matchingWindow?.orderFrontRegardless()
+        finalizeWindowPresentation(window: matchingWindow)
+    }
+
+    func registerSettingsWindow(_ window: NSWindow) {
+        settingsWindow = window
+    }
+
+    func finalizeSettingsWindowPresentation() {
+        finalizeWindowPresentation(window: resolvedSettingsWindow())
+    }
+
+    private func finalizeWindowPresentation(window: NSWindow?) {
+        NSApp.activate(ignoringOtherApps: true)
+        NSRunningApplication.current.activate(options: [.activateAllWindows])
+
+        guard let window else { return }
+        if window.isMiniaturized {
+            window.deminiaturize(nil)
+        }
+        window.ignoresMouseEvents = false
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
+    }
+
+    private func resolvedSettingsWindow() -> NSWindow? {
+        if let settingsWindow {
+            return settingsWindow
+        }
+        if let identified = NSApp.windows.first(where: {
+            $0.identifier?.rawValue == "com_apple_SwiftUI_Settings_window"
+        }) {
+            settingsWindow = identified
+            return identified
+        }
+        return NSApp.windows.first { window in
+            window.title.localizedCaseInsensitiveContains("settings")
+                || window.title.contains("设置")
+        }
     }
 
     // Records native window lifecycle events and disables tracking for hidden windows.
     func updateWindowLifecycle(named name: String, isVisible: Bool) {
-        let matchingWindows = NSApp.windows.filter { window in
+        var matchingWindows = NSApp.windows.filter { window in
             window.title.localizedCaseInsensitiveContains(name)
+        }
+        if name.caseInsensitiveCompare("Settings") == .orderedSame,
+           let settingsWindow = resolvedSettingsWindow(),
+           !matchingWindows.contains(where: { $0 === settingsWindow }) {
+            matchingWindows.append(settingsWindow)
         }
 
         for window in matchingWindows {

@@ -249,13 +249,16 @@ BUILD_COMPLETED=1
 
 RELEASE_URL=""
 if [[ "${DAYDREAM_SKIP_RELEASE:-0}" != "1" ]]; then
+    if [[ -d "$SCRIPT_DIR/.git" && -d "$SCRIPT_DIR/.githooks" ]]; then
+        /usr/bin/git -C "$SCRIPT_DIR" config core.hooksPath .githooks || true
+    fi
     if GH_CLI="$(find_gh_cli)" && "$GH_CLI" auth status >/dev/null 2>&1; then
         if [[ -d "$SCRIPT_DIR/.git" ]] && ! /usr/bin/git -C "$SCRIPT_DIR" diff --quiet -- "daydream.xcodeproj/project.pbxproj"; then
             print -- "Committing version bump ($APP_VERSION build $APP_BUILD)..."
             /usr/bin/git -C "$SCRIPT_DIR" add -- "daydream.xcodeproj/project.pbxproj"
             /usr/bin/git -C "$SCRIPT_DIR" commit -m "Bump version to $APP_VERSION ($APP_BUILD)" -- "daydream.xcodeproj/project.pbxproj"
             CURRENT_BRANCH="$(/usr/bin/git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD)"
-            /usr/bin/git -C "$SCRIPT_DIR" push origin "$CURRENT_BRANCH"
+            DAYDREAM_RELEASE_IN_PROGRESS=1 /usr/bin/git -C "$SCRIPT_DIR" push origin "$CURRENT_BRANCH"
         fi
 
         RELEASE_TAG="v$APP_VERSION"

@@ -127,13 +127,12 @@ struct MenuBarView: View {
             Divider()
 
             Button("Configure App Rules…") {
-                appModel.selectedSettingsSection = .inputSources
-                openSettings()
+                presentSettings(section: .inputSources)
             }
         }
 
         Button("Settings…") {
-            openSettings()
+            presentSettings()
         }
 
         Button("Show Diagnostics") {
@@ -152,6 +151,19 @@ struct MenuBarView: View {
             NSApp.terminate(nil)
         }
         .keyboardShortcut("q")
+    }
+
+    private func presentSettings(section: SettingsSection? = nil) {
+        if let section {
+            appModel.selectedSettingsSection = section
+        }
+        appModel.prepareForAppWindowPresentation()
+        openSettings()
+        Task { @MainActor in
+            appModel.finalizeSettingsWindowPresentation()
+            try? await Task.sleep(for: .milliseconds(120))
+            appModel.finalizeSettingsWindowPresentation()
+        }
     }
 
     private func commandMenuTitle(for command: AICommand) -> String {

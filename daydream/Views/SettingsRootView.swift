@@ -30,7 +30,11 @@ struct SettingsRootView: View {
                 VersionHistorySettingsView(appModel: appModel)
             }
         }
-        .background(SettingsWindowConfigurator())
+        .background(
+            SettingsWindowConfigurator { window in
+                appModel.registerSettingsWindow(window)
+            }
+        )
         .onAppear {
             appModel.updateWindowLifecycle(named: "Settings", isVisible: true)
         }
@@ -67,16 +71,32 @@ struct SettingsRootView: View {
 }
 
 private struct SettingsWindowConfigurator: NSViewRepresentable {
+    let onResolveWindow: (NSWindow) -> Void
+
     func makeNSView(context: Context) -> NSView {
-        SettingsWindowConfigurationView()
+        SettingsWindowConfigurationView(onResolveWindow: onResolveWindow)
     }
 
     func updateNSView(_ nsView: NSView, context: Context) {
-        (nsView as? SettingsWindowConfigurationView)?.configureWindow()
+        guard let view = nsView as? SettingsWindowConfigurationView else { return }
+        view.onResolveWindow = onResolveWindow
+        view.configureWindow()
     }
 }
 
 private final class SettingsWindowConfigurationView: NSView {
+    var onResolveWindow: (NSWindow) -> Void
+
+    init(onResolveWindow: @escaping (NSWindow) -> Void) {
+        self.onResolveWindow = onResolveWindow
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         configureWindow()
@@ -85,6 +105,7 @@ private final class SettingsWindowConfigurationView: NSView {
     func configureWindow() {
         guard let window else { return }
 
+        onResolveWindow(window)
         window.toolbarStyle = .unifiedCompact
         window.titleVisibility = .visible
         window.titlebarAppearsTransparent = false

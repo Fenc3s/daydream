@@ -1,0 +1,45 @@
+#!/bin/zsh
+
+set -euo pipefail
+
+# Allow pushes initiated by install-daydream.command or explicitly bypassed.
+if [[ "${DAYDREAM_RELEASE_IN_PROGRESS:-0}" == "1" || "${DAYDREAM_SKIP_RELEASE_CHECK:-0}" == "1" ]]; then
+    exit 0
+fi
+
+ZERO_SHA="0000000000000000000000000000000000000000"
+
+while read -r local_ref local_sha remote_ref remote_sha; do
+    # Only enforce on pushes to main.
+    if [[ "$remote_ref" != "refs/heads/main" || "$local_sha" == "$ZERO_SHA" ]]; then
+        continue
+    fi
+
+    if [[ "$remote_sha" == "$ZERO_SHA" ]]; then
+        changed_files="$(git diff-tree --no-commit-id --name-only -r "$local_sha")"
+    else
+        changed_files="$(git diff --name-only "${remote_sha}..${local_sha}")"
+    fi
+
+    # Skip if nothing changed or only README.md was modified.
+    non_readme_files="$(print -r -- "$changed_files" | grep -vE '^(README\.md)?$' || true)"
+    if [[ -z "$non_readme_files" ]]; then
+        continue
+    fi
+
+    # Allow if HEAD is already a version bump commit created by install-daydream.command.
+    head_subject="$(git log -1 --pretty=%s "$local_sha")"
+    if [[ "$head_subject" == "Bump version to "* ]]; then
+        continue
+    fi
+
+    print -u2 -- ""
+    print -u2 -- "Blocked direct push to main with unreleased non-README changes:"
+    print -u2 -- "$non_readme_files" | sed 's/^/  - /' >&2
+    print -u2 -- ""
+    print -u2 -- "Run ./install-daydream.command instead to bump the version, install, push, and publish a GitHub Release."
+    print -u2 -- "(To push without creating a release, run: DAYDREAM_SKIP_RELEASE_CHECK=1 git push)"
+    exit 1
+done
+
+exit 0
