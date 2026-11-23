@@ -45,6 +45,9 @@ final class AIClient {
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
         deepSeekAPIKey: String,
+        chatGPTBaseURL: String = AppSettings.default.chatGPTBaseURL,
+        chatGPTAccessToken: String = "",
+        chatGPTTokenRefresher: (@Sendable () async throws -> String)? = nil,
         model: String,
         prompt: String
     ) async throws -> String {
@@ -54,6 +57,9 @@ final class AIClient {
             openRouterAPIKey: openRouterAPIKey,
             deepSeekBaseURL: deepSeekBaseURL,
             deepSeekAPIKey: deepSeekAPIKey,
+            chatGPTBaseURL: chatGPTBaseURL,
+            chatGPTAccessToken: chatGPTAccessToken,
+            chatGPTTokenRefresher: chatGPTTokenRefresher,
             model: model,
             messages: [
                 .init(role: "user", content: prompt)
@@ -67,10 +73,37 @@ final class AIClient {
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
         deepSeekAPIKey: String,
+        chatGPTBaseURL: String = AppSettings.default.chatGPTBaseURL,
+        chatGPTAccessToken: String = "",
+        chatGPTTokenRefresher: (@Sendable () async throws -> String)? = nil,
         model: String,
         messages: [AIClientMessage],
         reasoningMode: ReasoningMode? = nil
     ) async throws -> String {
+        if provider == .chatGPT {
+            var output = ""
+            for try await delta in streamText(
+                provider: provider,
+                openRouterBaseURL: openRouterBaseURL,
+                openRouterAPIKey: openRouterAPIKey,
+                deepSeekBaseURL: deepSeekBaseURL,
+                deepSeekAPIKey: deepSeekAPIKey,
+                chatGPTBaseURL: chatGPTBaseURL,
+                chatGPTAccessToken: chatGPTAccessToken,
+                chatGPTTokenRefresher: chatGPTTokenRefresher,
+                model: model,
+                messages: messages,
+                reasoningMode: reasoningMode
+            ) {
+                output += delta
+            }
+            let trimmed = output.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else {
+                throw AppError.noResponseText
+            }
+            return trimmed
+        }
+
         let effectiveReasoningMode = await effectiveReasoningMode(
             provider: provider,
             openRouterBaseURL: openRouterBaseURL,
@@ -88,6 +121,9 @@ final class AIClient {
         case .deepSeek:
             baseURLString = deepSeekBaseURL
             apiKey = deepSeekAPIKey
+        case .chatGPT:
+            baseURLString = chatGPTBaseURL
+            apiKey = chatGPTAccessToken
         }
 
         guard var url = URL(string: baseURLString) else {
@@ -163,6 +199,9 @@ final class AIClient {
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
         deepSeekAPIKey: String,
+        chatGPTBaseURL: String = AppSettings.default.chatGPTBaseURL,
+        chatGPTAccessToken: String = "",
+        chatGPTTokenRefresher: (@Sendable () async throws -> String)? = nil,
         model: String,
         prompt: String
     ) -> AsyncThrowingStream<String, Error> {
@@ -172,6 +211,9 @@ final class AIClient {
             openRouterAPIKey: openRouterAPIKey,
             deepSeekBaseURL: deepSeekBaseURL,
             deepSeekAPIKey: deepSeekAPIKey,
+            chatGPTBaseURL: chatGPTBaseURL,
+            chatGPTAccessToken: chatGPTAccessToken,
+            chatGPTTokenRefresher: chatGPTTokenRefresher,
             model: model,
             messages: [
                 .init(role: "user", content: prompt)
@@ -185,6 +227,9 @@ final class AIClient {
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
         deepSeekAPIKey: String,
+        chatGPTBaseURL: String = AppSettings.default.chatGPTBaseURL,
+        chatGPTAccessToken: String = "",
+        chatGPTTokenRefresher: (@Sendable () async throws -> String)? = nil,
         model: String,
         messages: [AIClientMessage],
         reasoningMode: ReasoningMode? = nil
@@ -201,20 +246,33 @@ final class AIClient {
                         requested: reasoningMode
                     )
                     var didRetryMandatoryReasoning = false
+                    var didRetryAuthRefresh = false
+                    var activeChatGPTToken = chatGPTAccessToken
 
                     while true {
                         try Task.checkCancellation()
-                        let request = try await makeChatCompletionsRequest(
-                            provider: provider,
-                            openRouterBaseURL: openRouterBaseURL,
-                            openRouterAPIKey: openRouterAPIKey,
-                            deepSeekBaseURL: deepSeekBaseURL,
-                            deepSeekAPIKey: deepSeekAPIKey,
-                            model: model,
-                            messages: messages,
-                            stream: true,
-                            reasoningMode: effectiveReasoningMode
-                        )
+                        let request: URLRequest
+                        if provider == .chatGPT {
+                            request = try await makeResponsesRequest(
+                                baseURLString: chatGPTBaseURL,
+                                accessToken: activeChatGPTToken,
+                                model: model,
+                                messages: messages,
+                                reasoningMode: effectiveReasoningMode
+                            )
+                        } else {
+                            request = try await makeChatCompletionsRequest(
+                                provider: provider,
+                                openRouterBaseURL: openRouterBaseURL,
+                                openRouterAPIKey: openRouterAPIKey,
+                                deepSeekBaseURL: deepSeekBaseURL,
+                                deepSeekAPIKey: deepSeekAPIKey,
+                                model: model,
+                                messages: messages,
+                                stream: true,
+                                reasoningMode: effectiveReasoningMode
+                            )
+                        }
                         let (bytes, response) = try await URLSession.shared.bytes(for: request)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? -1
 
@@ -228,6 +286,20 @@ final class AIClient {
                                     "body_preview": String(responseBody.prefix(600)),
                                 ]
                             )
+
+                            if provider == .chatGPT,
+                               statusCode == 401,
+                               !didRetryAuthRefresh,
+                               let chatGPTTokenRefresher {
+                                didRetryAuthRefresh = true
+                                activeChatGPTToken = try await chatGPTTokenRefresher()
+                                await logger.log(
+                                    "api",
+                                    "Retrying ChatGPT request after token refresh",
+                                    metadata: ["model": model]
+                                )
+                                continue
+                            }
 
                             if provider == .openRouter,
                                effectiveReasoningMode == .disabled,
@@ -253,19 +325,54 @@ final class AIClient {
                             )
                         }
 
-                        for try await line in bytes.lines {
-                            try Task.checkCancellation()
-                            guard line.hasPrefix("data:") else { continue }
-                            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
-                            guard !payload.isEmpty, payload != "[DONE]" else {
+                        if provider == .chatGPT {
+                            var emittedAnyDelta = false
+                            for try await line in bytes.lines {
+                                try Task.checkCancellation()
+                                guard line.hasPrefix("data:") else { continue }
+                                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !payload.isEmpty else { continue }
                                 if payload == "[DONE]" { break }
-                                continue
+                                guard let data = payload.data(using: .utf8),
+                                      let event = try? JSONDecoder().decode(ResponsesStreamEvent.self, from: data) else {
+                                    continue
+                                }
+                                switch event.type {
+                                case "response.output_text.delta":
+                                    if let delta = event.delta, !delta.isEmpty {
+                                        emittedAnyDelta = true
+                                        continuation.yield(delta)
+                                    }
+                                case "response.failed", "error":
+                                    let message = event.error?.message
+                                        ?? event.response?.error?.message
+                                        ?? "ChatGPT returned an error during streaming."
+                                    throw AIClientError.serverResponse(statusCode: statusCode, message: message)
+                                case "response.completed":
+                                    if !emittedAnyDelta,
+                                       let fallbackText = event.response?.resolvedOutputText,
+                                       !fallbackText.isEmpty {
+                                        continuation.yield(fallbackText)
+                                    }
+                                default:
+                                    break
+                                }
                             }
-                            guard let data = payload.data(using: .utf8) else { continue }
-                            let decoded = try JSONDecoder().decode(ChatCompletionsStreamResponse.self, from: data)
-                            for choice in decoded.choices {
-                                if let content = choice.delta.resolvedText, !content.isEmpty {
-                                    continuation.yield(content)
+                        } else {
+                            for try await line in bytes.lines {
+                                try Task.checkCancellation()
+                                guard line.hasPrefix("data:") else { continue }
+                                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespacesAndNewlines)
+                                guard !payload.isEmpty, payload != "[DONE]" else {
+                                    if payload == "[DONE]" { break }
+                                    continue
+                                }
+                                guard let data = payload.data(using: .utf8) else { continue }
+                                let decoded = try JSONDecoder().decode(ChatCompletionsStreamResponse.self, from: data)
+                                for choice in decoded.choices {
+                                    if let content = choice.delta.resolvedText, !content.isEmpty {
+                                        continuation.yield(content)
+                                    }
                                 }
                             }
                         }
@@ -280,6 +387,56 @@ final class AIClient {
                 streamTask.cancel()
             }
         }
+    }
+
+    private func makeResponsesRequest(
+        baseURLString: String,
+        accessToken: String,
+        model: String,
+        messages: [AIClientMessage],
+        reasoningMode: ReasoningMode?
+    ) async throws -> URLRequest {
+        guard var url = URL(string: baseURLString) else {
+            throw AppError.invalidBaseURL
+        }
+        url.append(path: "responses")
+
+        let inputMessages = messages.map { message in
+            let role = message.role == "system" ? "developer" : message.role
+            return ResponsesInputMessage(role: role, content: message.content)
+        }
+        let reasoning = reasoningMode?.effort.map { ResponsesRequest.Reasoning(effort: $0) }
+        let requestBody = ResponsesRequest(
+            model: model,
+            input: inputMessages,
+            store: false,
+            stream: true,
+            reasoning: reasoning
+        )
+
+        await logger.log(
+            "api",
+            "Sending streaming request",
+            metadata: [
+                "provider": AIProvider.chatGPT.rawValue,
+                "url": url.absoluteString,
+                "model": model,
+                "reasoning": reasoningDescription(for: reasoningMode),
+                "message_count": "\(messages.count)",
+                "prompt_preview": String(messages.last?.content.prefix(240) ?? ""),
+            ]
+        )
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.timeoutInterval = 120
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        if !accessToken.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONEncoder().encode(requestBody)
+        return request
     }
 
     private func makeChatCompletionsRequest(
@@ -303,6 +460,9 @@ final class AIClient {
         case .deepSeek:
             baseURLString = deepSeekBaseURL
             apiKey = deepSeekAPIKey
+        case .chatGPT:
+            baseURLString = AppSettings.default.chatGPTBaseURL
+            apiKey = ""
         }
 
         guard var url = URL(string: baseURLString) else {
@@ -693,5 +853,57 @@ private struct ContentPart: Codable {
 
     struct ImageURL: Codable {
         var url: String
+    }
+}
+
+private struct ResponsesRequest: Encodable {
+    var model: String
+    var input: [ResponsesInputMessage]
+    var store: Bool
+    var stream: Bool
+    var reasoning: Reasoning?
+
+    struct Reasoning: Encodable {
+        var effort: String
+    }
+}
+
+private struct ResponsesInputMessage: Encodable {
+    var role: String
+    var content: String
+}
+
+private struct ResponsesStreamEvent: Decodable {
+    var type: String?
+    var delta: String?
+    var error: ErrorDetail?
+    var response: CompletedResponse?
+
+    struct ErrorDetail: Decodable {
+        var message: String?
+    }
+
+    struct CompletedResponse: Decodable {
+        var error: ErrorDetail?
+        var output: [OutputItem]?
+
+        var resolvedOutputText: String? {
+            guard let output else { return nil }
+            let chunks = output.flatMap { item in
+                (item.content ?? []).compactMap { part in
+                    part.text
+                }
+            }
+            let joined = chunks.joined()
+            return joined.isEmpty ? nil : joined
+        }
+    }
+
+    struct OutputItem: Decodable {
+        var content: [OutputContentPart]?
+    }
+
+    struct OutputContentPart: Decodable {
+        var text: String?
     }
 }

@@ -76,7 +76,12 @@ final class SettingsStore {
         }
     }
 
+    var credentials: any CredentialStoring {
+        credentialStore
+    }
+
     func ensureCredentialsLoaded(for provider: AIProvider, in settings: inout AppSettings) {
+        guard provider != .chatGPT else { return }
         let account = CredentialAccount(provider: provider)
         let hadCachedValue = cachedCredentials[account] != nil
         let stored = loadCredential(for: account)
@@ -86,6 +91,8 @@ final class SettingsStore {
             if settings.openRouterAPIKey.isEmpty { settings.openRouterAPIKey = stored }
         case .deepSeek:
             if settings.deepSeekAPIKey.isEmpty { settings.deepSeekAPIKey = stored }
+        case .chatGPT:
+            break
         }
     }
 

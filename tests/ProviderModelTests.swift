@@ -91,13 +91,88 @@ struct ProviderModelTests {
                     _ = try await client.generateText(provider: provider,
                         openRouterBaseURL: testURL, openRouterAPIKey: "",
                         deepSeekBaseURL: testURL, deepSeekAPIKey: "",
+                        chatGPTBaseURL: testURL, chatGPTAccessToken: "chatgpt-test-token",
                         model: provider.rawValue, messages: [.init(role: "user", content: mode.rawValue)], reasoningMode: mode)
                     for try await _ in client.streamText(provider: provider,
                         openRouterBaseURL: testURL, openRouterAPIKey: "",
                         deepSeekBaseURL: testURL, deepSeekAPIKey: "",
+                        chatGPTBaseURL: testURL, chatGPTAccessToken: "chatgpt-test-token",
                         model: provider.rawValue, messages: [.init(role: "user", content: mode.rawValue)], reasoningMode: mode) {}
                 }
             }
+
+            // Verify ChatGPT 401 automatic token refresh retry on /v1/responses.
+            let refreshedOutput = try await client.generateText(
+                provider: .chatGPT,
+                openRouterBaseURL: testURL, openRouterAPIKey: "",
+                deepSeekBaseURL: testURL, deepSeekAPIKey: "",
+                chatGPTBaseURL: testURL, chatGPTAccessToken: "expired-chatgpt-token",
+                chatGPTTokenRefresher: { "chatgpt-refreshed-token" },
+                model: "gpt-5.4",
+                messages: [.init(role: "user", content: "refresh-retry-check")]
+            )
+            check(refreshedOutput == "OK", "Retry ChatGPT Responses request after 401 token refresh")
+
+            // Verify ChatGPT /v1/models catalog decoding (visibility == "list" + server order + supported_reasoning_levels).
+            let chatGPTCatalog = try await ProviderModelCatalog.fetch(
+                provider: .chatGPT,
+                baseURL: testURL,
+                apiKey: "chatgpt-models-token"
+            )
+            check(chatGPTCatalog.data.map(\.id) == ["gpt-5.4", "gpt-5.4-mini"], "Filter ChatGPT models by visibility == list and preserve server order")
+            check(chatGPTCatalog.data.first?.reasoning?.supportedEfforts == ["low", "high"], "Decode ChatGPT supported_reasoning_levels into reasoning capabilities")
+
+            // Verify end-to-end Sign in with ChatGPT loopback callback, code exchange, persistence, and token refresh.
+            let oauthTestDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+            defer { try? FileManager.default.removeItem(at: oauthTestDir) }
+            try FileManager.default.createDirectory(at: oauthTestDir, withIntermediateDirectories: true)
+            let oauthCredStore = DirectoryCredentialStore(directory: oauthTestDir)
+            let tokenURL = URL(string: testURL)!.deletingLastPathComponent().appending(path: "oauth/token")
+            let authService = ChatGPTAuthService(
+                credentialStore: oauthCredStore,
+                configuration: ChatGPTAuthConfiguration(
+                    authorizeEndpoint: ChatGPTAuthConfiguration.default.authorizeEndpoint,
+                    tokenEndpoint: tokenURL,
+                    resource: "https://api.openai.com/v1",
+                    scope: ChatGPTAuthConfiguration.default.scope,
+                    bootstrapClientID: "dynamic_agent_client",
+                    agentNameHint: "daydream"
+                ),
+                logger: AppLogger(directory: oauthTestDir, maxLogFileBytes: 4_096)
+            )
+            let signedInSession = try await authService.signIn(timeout: .seconds(10)) { authURL in
+                Task {
+                    let components = URLComponents(url: authURL, resolvingAgainstBaseURL: false)!
+                    let items = Dictionary(components.queryItems!.compactMap { q in q.value.map { (q.name, $0) } }, uniquingKeysWith: { _, last in last })
+                    let redirectURI = items["redirect_uri"]!
+                    let state = items["state"]!
+                    var callback = URLComponents(string: redirectURI)!
+                    callback.queryItems = [
+                        URLQueryItem(name: "code", value: "test-auth-code"),
+                        URLQueryItem(name: "state", value: state),
+                        URLQueryItem(name: "client_id", value: "oaiapp_test123"),
+                        URLQueryItem(name: "scope", value: ChatGPTAuthConfiguration.default.scope),
+                    ]
+                    _ = try? await URLSession.shared.data(from: callback.url!)
+                }
+            }
+            check(signedInSession.accessToken == "chatgpt-access-1", "Exchange authorization code for access token")
+            check(signedInSession.clientID == "oaiapp_test123", "Persist dynamically issued oaiapp_ client_id")
+            check(signedInSession.displayIdentity == "homer@example.com", "Decode email claim from OIDC id_token")
+            check(signedInSession.hasDirectPlanUsageScope, "Verify chatgpt.tokens.use.direct scope")
+            check(oauthCredStore.string(for: .chatGPTClientID) == "oaiapp_test123", "Store issued client_id in credential store")
+            let refreshedToken = try await authService.validAccessToken(forceRefresh: true)
+            check(refreshedToken == "chatgpt-access-2", "Refresh expired access token using refresh_token grant")
+            let reloadedAuthService = ChatGPTAuthService(
+                credentialStore: oauthCredStore,
+                logger: AppLogger(directory: oauthTestDir, maxLogFileBytes: 4_096)
+            )
+            let persistedSession = await reloadedAuthService.currentSession()
+            check(persistedSession?.accessToken == "chatgpt-access-2" && persistedSession?.refreshToken == "chatgpt-refresh-2", "Persist refreshed tokens across restart")
+            await reloadedAuthService.signOut()
+            let afterSignOut = await reloadedAuthService.currentSession()
+            check(afterSignOut == nil, "Sign out clears ChatGPT session")
+            check(oauthCredStore.string(for: .chatGPTHostID)?.hasPrefix("urn:uuid:") == true, "Preserve ext_agent_host_id across sign out")
         }
 
         let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
@@ -1033,7 +1108,47 @@ struct ProviderModelTests {
 
         try await runWindowMoverTests()
 
-        print("Provider model, discovery, migration, Keychain, SQLite FTS5, Obsidian, Input Source Switching, Window Mover, and single-file iCloud query checks passed")
+        // Verify Sign in with ChatGPT OAuth URL construction, PKCE, callback parsing, and ID token decoding.
+        let pkce = ChatGPTAuthService.generatePKCE()
+        check(pkce.verifier.count >= 43 && !pkce.challenge.contains("=") && !pkce.challenge.contains("+") && !pkce.challenge.contains("/"), "Generate RFC 7636 URL-safe PKCE verifier and S256 challenge")
+        let firstAuthURL = ChatGPTAuthService.makeAuthorizationURL(
+            redirectURI: "http://127.0.0.1:43210/callback",
+            state: "state-1",
+            nonce: "nonce-1",
+            codeChallenge: pkce.challenge,
+            hostID: "urn:uuid:11111111-2222-3333-4444-555555555555",
+            existingClientID: nil
+        )
+        let firstItems = Dictionary(URLComponents(url: firstAuthURL, resolvingAgainstBaseURL: false)!.queryItems!.compactMap { q in q.value.map { (q.name, $0) } }, uniquingKeysWith: { _, last in last })
+        check(firstItems["client_id"] == "dynamic_agent_client" && firstItems["agent_name_hint"] == "daydream", "First-time dynamic registration sends dynamic_agent_client and agent_name_hint")
+        check(firstItems["ext_agent_host_id"] == "urn:uuid:11111111-2222-3333-4444-555555555555" && firstItems["resource"] == "https://api.openai.com/v1" && firstItems["code_challenge_method"] == "S256", "Include host ID, resource, and S256 PKCE parameters")
+        let returningAuthURL = ChatGPTAuthService.makeAuthorizationURL(
+            redirectURI: "http://127.0.0.1:43210/callback",
+            state: "state-2",
+            nonce: "nonce-2",
+            codeChallenge: pkce.challenge,
+            hostID: "urn:uuid:11111111-2222-3333-4444-555555555555",
+            existingClientID: "oaiapp_existing"
+        )
+        let returningItems = Dictionary(URLComponents(url: returningAuthURL, resolvingAgainstBaseURL: false)!.queryItems!.compactMap { q in q.value.map { (q.name, $0) } }, uniquingKeysWith: { _, last in last })
+        check(returningItems["client_id"] == "oaiapp_existing" && returningItems["agent_name_hint"] == nil, "Returning sign-in reuses oaiapp_ client_id and omits agent_name_hint")
+        let parsedCallback = try ChatGPTAuthService.parseCallbackQuery(
+            from: URL(string: "http://127.0.0.1:43210/callback?code=abc&state=state-1&client_id=oaiapp_new")!,
+            expectedState: "state-1"
+        )
+        check(parsedCallback.code == "abc" && parsedCallback.clientID == "oaiapp_new", "Parse valid OAuth callback query")
+        var didRejectBadState = false
+        do {
+            _ = try ChatGPTAuthService.parseCallbackQuery(
+                from: URL(string: "http://127.0.0.1:43210/callback?code=abc&state=wrong")!,
+                expectedState: "state-1"
+            )
+        } catch ChatGPTAuthError.stateMismatch {
+            didRejectBadState = true
+        }
+        check(didRejectBadState, "Reject OAuth callback with mismatched state")
+
+        print("Provider model, discovery, migration, Keychain, SQLite FTS5, Obsidian, Input Source Switching, Window Mover, Sign in with ChatGPT, and single-file iCloud query checks passed")
     }
 
     private static func runWindowMoverTests() async throws {

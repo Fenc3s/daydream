@@ -52,6 +52,9 @@ final class AppModel {
     var modelCapabilities: [String: [String: OpenRouterReasoningCapability]] = [:]
     var modelCatalogStatus: [String: String] = [:]
     var refreshingModelProviders: Set<String> = []
+    var chatGPTAuthSession: ChatGPTAuthSession?
+    var isSigningInWithChatGPT = false
+    var chatGPTAuthStatusMessage: String?
 
 
     var applicationVersionDisplay: String {
@@ -70,6 +73,7 @@ final class AppModel {
     @ObservationIgnored private let logger: AppLogger
     @ObservationIgnored private let gitVersionService: GitVersionService
     @ObservationIgnored private let openAIClient: AIClient
+    @ObservationIgnored private let chatGPTAuthService: ChatGPTAuthService
     @ObservationIgnored private let selectionService: SelectionService
     @ObservationIgnored private let replaceService: ReplaceService
     @ObservationIgnored private let windowMoverService: WindowMoverService
@@ -101,6 +105,7 @@ final class AppModel {
     @ObservationIgnored private var clipboardHistoryTargetApplication: ExternalApplicationTarget?
     @ObservationIgnored private var activeCommandTask: Task<Void, Never>?
     @ObservationIgnored private var activeWindowMoveTask: Task<Void, Never>?
+    @ObservationIgnored private var activeChatGPTSignInTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -114,6 +119,10 @@ final class AppModel {
         self.logger = logger
         self.gitVersionService = gitVersionService
         openAIClient = AIClient(logger: logger)
+        chatGPTAuthService = ChatGPTAuthService(
+            credentialStore: settingsStore.credentials,
+            logger: logger
+        )
         selectionService = SelectionService(logger: logger)
         replaceService = ReplaceService(logger: logger)
         windowMoverService = WindowMoverService(logger: logger)
@@ -165,6 +174,9 @@ final class AppModel {
         guard !isBootstrapped else { return }
         isBootstrapped = true
         settings = settingsStore.load(activeProviderOnly: true)
+        if settings.provider == .chatGPT {
+            chatGPTAuthSession = await chatGPTAuthService.currentSession()
+        }
         normalizeCommandSettingsForCurrentProvider()
         if settingsStore.migrateCommandReasoningInheritance(in: &settings) {
             settingsStore.save(settings)
@@ -609,6 +621,69 @@ final class AppModel {
         settingsStore.ensureCredentialsLoaded(for: provider, in: &settings)
     }
 
+    func ensureChatGPTAuthSessionLoaded() {
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            self.chatGPTAuthSession = await self.chatGPTAuthService.currentSession()
+        }
+    }
+
+    func signInWithChatGPT() {
+        guard !isSigningInWithChatGPT else { return }
+        isSigningInWithChatGPT = true
+        chatGPTAuthStatusMessage = "Complete Sign in with ChatGPT in your browser…"
+        activeChatGPTSignInTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+            defer {
+                self.isSigningInWithChatGPT = false
+                self.activeChatGPTSignInTask = nil
+            }
+            do {
+                let session = try await self.chatGPTAuthService.signIn()
+                self.chatGPTAuthSession = session
+                if session.hasDirectPlanUsageScope {
+                    self.chatGPTAuthStatusMessage = nil
+                } else {
+                    self.chatGPTAuthStatusMessage = "Signed in, but ChatGPT plan usage scope was not granted. Model requests may fail."
+                }
+                self.prepareForAppWindowPresentation()
+                self.refreshProviderModels(.chatGPT)
+            } catch ChatGPTAuthError.cancelled {
+                self.chatGPTAuthStatusMessage = nil
+            } catch is CancellationError {
+                self.chatGPTAuthStatusMessage = nil
+            } catch {
+                self.chatGPTAuthStatusMessage = error.localizedDescription
+                await self.logger.log(
+                    "auth",
+                    "Sign in with ChatGPT failed",
+                    metadata: ["error": error.localizedDescription]
+                )
+            }
+        }
+    }
+
+    func cancelChatGPTSignIn() {
+        activeChatGPTSignInTask?.cancel()
+        activeChatGPTSignInTask = nil
+        Task {
+            await chatGPTAuthService.cancelSignIn()
+        }
+    }
+
+    func signOutOfChatGPT() {
+        cancelChatGPTSignIn()
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            await self.chatGPTAuthService.signOut()
+            self.chatGPTAuthSession = nil
+            self.chatGPTAuthStatusMessage = nil
+            self.discoveredModels.removeValue(forKey: AIProvider.chatGPT.rawValue)
+            self.modelCapabilities.removeValue(forKey: AIProvider.chatGPT.rawValue)
+            self.modelCatalogStatus.removeValue(forKey: AIProvider.chatGPT.rawValue)
+        }
+    }
+
     func selectProvider(_ provider: AIProvider) {
         guard provider != settings.provider else { return }
         ensureCredentialsLoaded(for: provider)
@@ -617,6 +692,14 @@ final class AppModel {
         saveSettings()
         if provider == .openRouter, modelCapabilities[provider.rawValue] == nil {
             refreshProviderModels(provider)
+        } else if provider == .chatGPT {
+            Task { @MainActor [weak self] in
+                guard let self else { return }
+                self.chatGPTAuthSession = await self.chatGPTAuthService.currentSession()
+                if self.chatGPTAuthSession != nil, self.modelCapabilities[provider.rawValue] == nil {
+                    self.refreshProviderModels(provider)
+                }
+            }
         }
     }
 
@@ -629,24 +712,34 @@ final class AppModel {
         switch provider {
         case .openRouter: (baseURL, apiKey) = (settings.openRouterBaseURL, settings.openRouterAPIKey)
         case .deepSeek: (baseURL, apiKey) = (settings.deepSeekBaseURL, settings.deepSeekAPIKey)
+        case .chatGPT: (baseURL, apiKey) = (settings.chatGPTBaseURL, "")
         }
         refreshingModelProviders.insert(providerID)
         modelCatalogStatus[providerID] = "Loading models…"
         Task {
             defer { refreshingModelProviders.remove(providerID) }
             do {
-                let catalog = try await ProviderModelCatalog.fetch(provider: provider, baseURL: baseURL, apiKey: apiKey)
+                let effectiveKey: String
+                if provider == .chatGPT {
+                    effectiveKey = try await chatGPTAuthService.validAccessToken()
+                    chatGPTAuthSession = await chatGPTAuthService.currentSession()
+                } else {
+                    effectiveKey = apiKey
+                }
+                let catalog = try await ProviderModelCatalog.fetch(provider: provider, baseURL: baseURL, apiKey: effectiveKey)
                 let currentURL: String
                 let currentKey: String
                 switch provider {
                 case .openRouter: (currentURL, currentKey) = (settings.openRouterBaseURL, settings.openRouterAPIKey)
                 case .deepSeek: (currentURL, currentKey) = (settings.deepSeekBaseURL, settings.deepSeekAPIKey)
+                case .chatGPT: (currentURL, currentKey) = (settings.chatGPTBaseURL, "")
                 }
-                guard currentURL == baseURL, currentKey == apiKey else {
+                guard currentURL == baseURL, (provider == .chatGPT || currentKey == apiKey) else {
                     modelCatalogStatus[providerID] = "Connection changed. Refresh models again."
                     return
                 }
-                let models = AppSettings.normalizedModels(catalog.data.map(\.id)).sorted()
+                let normalized = AppSettings.normalizedModels(catalog.data.map(\.id))
+                let models = provider == .chatGPT ? normalized : normalized.sorted()
                 discoveredModels[providerID] = models
                 var capabilities: [String: OpenRouterReasoningCapability] = [:]
                 for model in catalog.data {
@@ -1010,12 +1103,27 @@ final class AppModel {
         ensureCredentialsLoaded(for: settings.provider)
 
         do {
+            let chatGPTToken: String
+            let chatGPTRefresher: (@Sendable () async throws -> String)?
+            if settings.provider == .chatGPT {
+                chatGPTToken = try await chatGPTAuthService.validAccessToken()
+                chatGPTAuthSession = await chatGPTAuthService.currentSession()
+                chatGPTRefresher = { [chatGPTAuthService] in
+                    try await chatGPTAuthService.validAccessToken(forceRefresh: true)
+                }
+            } else {
+                chatGPTToken = ""
+                chatGPTRefresher = nil
+            }
             let summary = try await openAIClient.generateText(
                 provider: settings.provider,
                 openRouterBaseURL: settings.openRouterBaseURL,
                 openRouterAPIKey: settings.openRouterAPIKey,
                 deepSeekBaseURL: settings.deepSeekBaseURL,
                 deepSeekAPIKey: settings.deepSeekAPIKey,
+                chatGPTBaseURL: settings.chatGPTBaseURL,
+                chatGPTAccessToken: chatGPTToken,
+                chatGPTTokenRefresher: chatGPTRefresher,
                 model: model,
                 messages: [
                     AIClientMessage(
@@ -1189,6 +1297,18 @@ final class AppModel {
                 clipboardText: preCommandClipboard
             )
             let requestMessages = commandRequestMessages(prompt: prompt, selectionText: selection.text, command: command)
+            let chatGPTToken: String
+            let chatGPTRefresher: (@Sendable () async throws -> String)?
+            if requestSettings.provider == .chatGPT {
+                chatGPTToken = try await chatGPTAuthService.validAccessToken()
+                chatGPTAuthSession = await chatGPTAuthService.currentSession()
+                chatGPTRefresher = { [chatGPTAuthService] in
+                    try await chatGPTAuthService.validAccessToken(forceRefresh: true)
+                }
+            } else {
+                chatGPTToken = ""
+                chatGPTRefresher = nil
+            }
             var output = ""
             var lastPopupUpdate = Date.distantPast
             var receivedFirstOutput = false
@@ -1198,6 +1318,9 @@ final class AppModel {
                 openRouterAPIKey: requestSettings.openRouterAPIKey,
                 deepSeekBaseURL: requestSettings.deepSeekBaseURL,
                 deepSeekAPIKey: requestSettings.deepSeekAPIKey,
+                chatGPTBaseURL: requestSettings.chatGPTBaseURL,
+                chatGPTAccessToken: chatGPTToken,
+                chatGPTTokenRefresher: chatGPTRefresher,
                 model: model, messages: requestMessages, reasoningMode: reasoningMode
             ) {
                 try Task.checkCancellation()

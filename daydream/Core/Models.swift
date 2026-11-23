@@ -12,6 +12,7 @@ struct AppSettings: Codable, Equatable, Sendable {
     var openRouterAPIKey: String
     var deepSeekBaseURL: String
     var deepSeekAPIKey: String
+    var chatGPTBaseURL: String
     var providerModelCatalogs: [String: [String]]
     var defaultModel: String
     var providerDefaultModels: [String: String]
@@ -57,6 +58,13 @@ struct AppSettings: Codable, Equatable, Sendable {
         deepSeekProModel
     ]
 
+    static let chatGPTDefaultModel = "gpt-5.4"
+    static let defaultChatGPTModelCatalog = [
+        "gpt-5.4",
+        "gpt-5.4-mini",
+        "gpt-4o"
+    ]
+
     static let openRouterDefaultModel = "google/gemini-3.5-flash-lite"
     static let deepSeekDefaultModel = deepSeekFlashModel
     static let defaultMoveWindowShortcut = KeyboardShortcut(
@@ -69,6 +77,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         openRouterAPIKey: "",
         deepSeekBaseURL: "https://api.deepseek.com",
         deepSeekAPIKey: "",
+        chatGPTBaseURL: "https://api.openai.com/v1",
         providerModelCatalogs: defaultProviderModelCatalogs,
         defaultModel: openRouterDefaultModel,
         providerDefaultModels: defaultProviderDefaultModels,
@@ -92,6 +101,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         case openRouterAPIKey
         case deepSeekBaseURL
         case deepSeekAPIKey
+        case chatGPTBaseURL
         case providerModelCatalogs
         case defaultModel
         case providerDefaultModels
@@ -115,6 +125,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         openRouterAPIKey: String,
         deepSeekBaseURL: String,
         deepSeekAPIKey: String,
+        chatGPTBaseURL: String = "https://api.openai.com/v1",
         providerModelCatalogs: [String: [String]],
         defaultModel: String,
         providerDefaultModels: [String: String],
@@ -133,6 +144,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         self.openRouterAPIKey = openRouterAPIKey
         self.deepSeekBaseURL = deepSeekBaseURL
         self.deepSeekAPIKey = deepSeekAPIKey
+        self.chatGPTBaseURL = chatGPTBaseURL
         self.providerModelCatalogs = Self.normalizedProviderModelCatalogs(providerModelCatalogs)
         self.defaultModel = defaultModel
         self.providerDefaultModels = Self.normalizedProviderDefaultModels(
@@ -163,6 +175,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         openRouterAPIKey = try container.decodeIfPresent(String.self, forKey: .openRouterAPIKey) ?? ""
         deepSeekBaseURL = try container.decodeIfPresent(String.self, forKey: .deepSeekBaseURL) ?? Self.default.deepSeekBaseURL
         deepSeekAPIKey = try container.decodeIfPresent(String.self, forKey: .deepSeekAPIKey) ?? ""
+        chatGPTBaseURL = try container.decodeIfPresent(String.self, forKey: .chatGPTBaseURL) ?? Self.default.chatGPTBaseURL
         let decodedProviderModelCatalogs = try container.decodeIfPresent([String: [String]].self, forKey: .providerModelCatalogs)
             ?? Self.defaultProviderModelCatalogs
         providerModelCatalogs = Self.normalizedProviderModelCatalogs(decodedProviderModelCatalogs)
@@ -305,6 +318,7 @@ struct AppSettings: Codable, Equatable, Sendable {
         [
             AIProvider.openRouter.rawValue: defaultOpenRouterModelCatalog,
             AIProvider.deepSeek.rawValue: deepSeekModelCatalog,
+            AIProvider.chatGPT.rawValue: defaultChatGPTModelCatalog,
         ]
     }
 
@@ -337,6 +351,8 @@ struct AppSettings: Codable, Equatable, Sendable {
             return openRouterDefaultModel
         case .deepSeek:
             return deepSeekDefaultModel
+        case .chatGPT:
+            return chatGPTDefaultModel
         }
     }
 
@@ -396,6 +412,7 @@ struct AppSettings: Codable, Equatable, Sendable {
 enum AIProvider: String, Codable, CaseIterable, Equatable, Sendable, Identifiable {
     case openRouter = "OpenRouter"
     case deepSeek = "DeepSeek"
+    case chatGPT = "ChatGPT"
 
     var id: String { rawValue }
 

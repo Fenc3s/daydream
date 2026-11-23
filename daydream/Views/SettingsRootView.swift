@@ -286,6 +286,62 @@ private struct GeneralSettingsView: View {
                                 )
                                 .textFieldStyle(.roundedBorder)
                             }
+
+                        case .chatGPT:
+                            settingsRow("ChatGPT Account") {
+                                VStack(alignment: .leading, spacing: 8) {
+                                    if appModel.isSigningInWithChatGPT {
+                                        HStack(spacing: 10) {
+                                            ProgressView()
+                                                .controlSize(.small)
+                                            Text("Waiting for browser sign-in…")
+                                                .foregroundStyle(.secondary)
+                                            Spacer()
+                                            Button("Cancel") {
+                                                appModel.cancelChatGPTSignIn()
+                                            }
+                                        }
+                                    } else if let session = appModel.chatGPTAuthSession {
+                                        HStack(spacing: 8) {
+                                            Circle()
+                                                .fill(session.hasDirectPlanUsageScope ? .green : .orange)
+                                                .frame(width: 8, height: 8)
+                                            Text("Signed in as \(session.displayIdentity)")
+                                                .lineLimit(1)
+                                                .truncationMode(.middle)
+                                            Spacer()
+                                            Button("Sign Out") {
+                                                appModel.signOutOfChatGPT()
+                                            }
+                                        }
+
+                                        Text("Uses your ChatGPT plan via Sign in with ChatGPT (OAuth + PKCE). Tokens refresh automatically.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    } else {
+                                        Button("Sign in with ChatGPT") {
+                                            appModel.signInWithChatGPT()
+                                        }
+                                        .buttonStyle(.borderedProminent)
+
+                                        Text("Authenticate in your browser to use your ChatGPT Plus or Pro plan without an API key.")
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+
+                                    if let statusMessage = appModel.chatGPTAuthStatusMessage,
+                                       !statusMessage.isEmpty {
+                                        Text(statusMessage)
+                                            .font(.caption)
+                                            .foregroundStyle(
+                                                appModel.chatGPTAuthSession == nil && !appModel.isSigningInWithChatGPT
+                                                    ? .red
+                                                    : .secondary
+                                            )
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    }
+                                }
+                            }
                         }
 
                         Divider()
@@ -430,6 +486,11 @@ private struct GeneralSettingsView: View {
             appModel.ensureCredentialsLoaded(for: appModel.settings.provider)
             if appModel.discoveredModels[appModel.settings.provider.rawValue] == nil {
                 appModel.refreshProviderModels(appModel.settings.provider)
+            }
+        }
+        .onAppear {
+            if appModel.settings.provider == .chatGPT {
+                appModel.ensureChatGPTAuthSessionLoaded()
             }
         }
     }
@@ -588,6 +649,8 @@ private struct ProviderModelCatalogEditor: View {
             return "vendor/model-id"
         case .deepSeek:
             return "deepseek-model-id"
+        case .chatGPT:
+            return "gpt-5.4"
         }
     }
 

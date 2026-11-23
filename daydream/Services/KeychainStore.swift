@@ -4,6 +4,9 @@ import Security
 enum CredentialAccount: String, CaseIterable, Sendable {
     case openRouterAPIKey = "openRouterAPIKey"
     case deepSeekAPIKey = "deepSeekAPIKey"
+    case chatGPTAuthSession = "chatGPTAuthSession"
+    case chatGPTHostID = "chatGPTHostID"
+    case chatGPTClientID = "chatGPTClientID"
 
     init(provider: AIProvider) {
         switch provider {
@@ -11,6 +14,8 @@ enum CredentialAccount: String, CaseIterable, Sendable {
             self = .openRouterAPIKey
         case .deepSeek:
             self = .deepSeekAPIKey
+        case .chatGPT:
+            self = .chatGPTAuthSession
         }
     }
 }

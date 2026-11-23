@@ -18,14 +18,116 @@ class Handler(BaseHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        payload = json.dumps({"data": [{"id": "OpenRouter", "reasoning": {"supported_efforts": ["low", "high"]}}]}).encode()
+        if self.headers.get("Authorization") == "Bearer chatgpt-models-token":
+            payload = json.dumps({
+                "models": [
+                    {
+                        "slug": "gpt-5.4",
+                        "display_name": "GPT-5.4",
+                        "visibility": "list",
+                        "supported_reasoning_levels": [{"effort": "low"}, {"effort": "high"}],
+                        "default_reasoning_level": "medium",
+                    },
+                    {
+                        "slug": "gpt-5.4-mini",
+                        "display_name": "GPT-5.4 Mini",
+                        "visibility": "list",
+                    },
+                    {
+                        "slug": "internal-hidden",
+                        "display_name": "Hidden",
+                        "visibility": "hide",
+                    },
+                ]
+            }).encode()
+        else:
+            payload = json.dumps({"data": [{"id": "OpenRouter", "reasoning": {"supported_efforts": ["low", "high"]}}]}).encode()
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.end_headers()
         self.wfile.write(payload)
 
     def do_POST(self):
-        body = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        raw_body = self.rfile.read(int(self.headers["Content-Length"]))
+        if self.path.endswith("/oauth/token"):
+            from urllib.parse import parse_qs
+            form = {k: v[0] for k, v in parse_qs(raw_body.decode("utf-8")).items()}
+            grant_type = form.get("grant_type")
+            try:
+                assert form.get("resource") == "https://api.openai.com/v1", form
+                if grant_type == "authorization_code":
+                    assert form.get("code") == "test-auth-code", form
+                    assert form.get("code_verifier"), form
+                    assert form.get("client_id") == "oaiapp_test123", form
+                    import base64
+                    header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').decode().rstrip("=")
+                    claims = base64.urlsafe_b64encode(
+                        json.dumps({"sub": "user_123", "email": "homer@example.com", "name": "Homer"}).encode()
+                    ).decode().rstrip("=")
+                    response = {
+                        "access_token": "chatgpt-access-1",
+                        "refresh_token": "chatgpt-refresh-1",
+                        "id_token": f"{header}.{claims}.sig",
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                        "scope": "openid profile email offline_access resource.invoke chatgpt.tokens.use.direct",
+                    }
+                elif grant_type == "refresh_token":
+                    assert form.get("refresh_token") == "chatgpt-refresh-1", form
+                    assert form.get("client_id") == "oaiapp_test123", form
+                    response = {
+                        "access_token": "chatgpt-access-2",
+                        "refresh_token": "chatgpt-refresh-2",
+                        "token_type": "Bearer",
+                        "expires_in": 3600,
+                    }
+                else:
+                    raise AssertionError(f"Unexpected grant_type: {grant_type}")
+            except AssertionError as error:
+                errors.append(str(error))
+                self.send_response(400)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":"invalid_request"}')
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(json.dumps(response).encode())
+            return
+
+        body = json.loads(raw_body)
+        if self.path.endswith("/responses"):
+            if self.headers.get("Authorization") == "Bearer expired-chatgpt-token":
+                self.send_response(401)
+                self.send_header("Content-Type", "application/json")
+                self.end_headers()
+                self.wfile.write(b'{"error":{"message":"Token expired"}}')
+                return
+            provider, mode = body["model"], body["input"][-1]["content"]
+            try:
+                assert body.get("store") is False, body
+                assert body.get("stream") is True, body
+                if mode == "modelDefault":
+                    assert "reasoning" not in body, body
+                elif mode in ["none", "low", "high"]:
+                    assert body.get("reasoning") == {"effort": mode}, body
+                if mode != "refresh-retry-check":
+                    requests.append((provider, mode, True))
+            except AssertionError as error:
+                errors.append(str(error))
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.end_headers()
+            events = [
+                {"type": "response.output_text.delta", "delta": "O"},
+                {"type": "response.output_text.delta", "delta": "K"},
+                {"type": "response.completed", "response": {"status": "completed"}},
+            ]
+            payload = "".join(f"data: {json.dumps(event)}\n\n" for event in events)
+            self.wfile.write(payload.encode())
+            return
+
         if body["model"].startswith("discovery-"):
             model = body["model"]
             effort = body.get("reasoning_effort")
@@ -93,6 +195,7 @@ enum ICloudPasswordsAutomationStatus {
         "daydream/Services/ClipboardHistoryStore.swift",
         "daydream/Support/PasteboardSnapshot.swift",
         "daydream/Services/AIClient.swift",
+        "daydream/Services/ChatGPTAuthService.swift",
         "daydream/Services/ProviderModelCatalog.swift",
         "daydream/Services/InputSourceSwitchingService.swift",
         "daydream/Services/WindowMoverService.swift",
@@ -104,5 +207,5 @@ enum ICloudPasswordsAutomationStatus {
     subprocess.run([str(folder / "tests"), "--requests"], env=env, check=True)
 server.shutdown()
 assert not errors, "\n".join(errors)
-assert len(requests) == 16, requests
-print("16 production HTTP payload checks passed (2 providers × 4 efforts × streaming/non-streaming)")
+assert len(requests) == 24, requests
+print("24 production HTTP payload checks passed (3 providers × 4 efforts × streaming/non-streaming)")
