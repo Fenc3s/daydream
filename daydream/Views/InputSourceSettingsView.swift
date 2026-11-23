@@ -84,6 +84,12 @@ struct InputSourceSettingsView: View {
                                 }
                                 .buttonStyle(.link)
                                 .font(.caption)
+
+                                Button("Open Settings") {
+                                    appModel.openAccessibilitySettings()
+                                }
+                                .buttonStyle(.link)
+                                .font(.caption)
                             }
                         }
                     }

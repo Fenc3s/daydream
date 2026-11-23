@@ -964,6 +964,129 @@ struct ProviderModelTests {
             "Canonicalize Siri appName on com.apple.Spotlight to Spotlight"
         )
 
+        // Launching/activating a third app (configured Notes or unconfigured Terminal) from Spotlight switches cleanly to that app's target input source.
+        let notesRule = AppInputSourceRule(
+            bundleIdentifier: "com.apple.Notes",
+            appName: "Notes",
+            inputSourceID: "com.apple.inputmethod.SCIM.ITABC",
+            isEnabled: true
+        )
+        let notesApp = RunningAppSnapshot(bundleIdentifier: "com.apple.Notes", localizedName: "Notes")
+        mockBackend.accessibilityTrusted = true
+        mockBackend.spotlightState = .inactive
+        mockBackend.frontmostApp = nil
+        switchingService.configure(
+            enabled: true,
+            defaultEnglishInputSourceID: nil,
+            rules: [weChatRule, notesRule]
+        )
+        mockBackend.currentSourceID = "com.apple.keylayout.US"
+        mockBackend.selectedIDs.removeAll()
+        mockBackend.frontmostApp = weChatApp
+        await switchingService.performSwitchForTesting(weChatApp)
+        check(
+            mockBackend.currentKeyboardInputSourceID() == "com.apple.inputmethod.SCIM.ITABC" &&
+            mockBackend.selectedIDs == ["com.apple.inputmethod.SCIM.ITABC"],
+            "Start in WeChat with Pinyin before opening Spotlight to launch a third app"
+        )
+
+        mockBackend.selectedIDs.removeAll()
+        mockBackend.spotlightState = .activeFocusedElement
+        await switchingService.performSpotlightCheckForTesting()
+        check(
+            mockBackend.currentKeyboardInputSourceID() == "com.apple.keylayout.US" &&
+            mockBackend.selectedIDs == ["com.apple.keylayout.US"],
+            "Opening Spotlight over WeChat switches to US English"
+        )
+
+        mockBackend.selectedIDs.removeAll()
+        mockBackend.spotlightState = .inactive
+        mockBackend.frontmostApp = notesApp
+        await switchingService.performSwitchForTesting(notesApp)
+        check(
+            mockBackend.frontmostApp == notesApp &&
+            mockBackend.currentKeyboardInputSourceID() == "com.apple.inputmethod.SCIM.ITABC" &&
+            mockBackend.selectedIDs == ["com.apple.inputmethod.SCIM.ITABC"],
+            "Activating configured Notes from Spotlight while Spotlight closes switches cleanly to Notes' target input source"
+        )
+
+        mockBackend.selectedIDs.removeAll()
+        mockBackend.spotlightState = .activeFocusedElement
+        await switchingService.performSpotlightCheckForTesting()
+        check(
+            mockBackend.currentKeyboardInputSourceID() == "com.apple.keylayout.US" &&
+            mockBackend.selectedIDs == ["com.apple.keylayout.US"],
+            "Re-opening Spotlight over Notes switches back to US English"
+        )
+
+        mockBackend.selectedIDs.removeAll()
+        mockBackend.spotlightState = .inactive
+        mockBackend.frontmostApp = terminalApp
+        await switchingService.performSwitchForTesting(terminalApp)
+        check(
+            mockBackend.frontmostApp == terminalApp &&
+            mockBackend.currentKeyboardInputSourceID() == "com.apple.keylayout.US" &&
+            mockBackend.selectedIDs.isEmpty,
+            "Activating unconfigured Terminal from Spotlight keeps US English cleanly with 0 redundant switches"
+        )
+
+        // Signal B (.activeFallbackWindow) mid-fade-out recovery when launching a third app from Spotlight.
+        let fallbackBackend = MockInputSourceBackend(
+            sources: [romajiSource, usSource, pinyinSource],
+            currentSourceID: usSource.id,
+            asciiLayoutSourceID: usSource.id
+        )
+        fallbackBackend.accessibilityTrusted = false
+        fallbackBackend.spotlightState = .activeFocusedElement
+        check(
+            fallbackBackend.spotlightActivityState(wasSpotlightActive: true) == .inactive,
+            "MockInputSourceBackend reports .inactive when accessibilityTrusted is false"
+        )
+        fallbackBackend.accessibilityTrusted = true
+        fallbackBackend.spotlightState = .inactive
+        fallbackBackend.recordedSpotlightStates.removeAll()
+
+        let fallbackSwitchingService = InputSourceSwitchingService(
+            logger: AppLogger(directory: inputLoggerDir, maxLogFileBytes: 4_096),
+            backend: fallbackBackend,
+            settleDelay: .milliseconds(5),
+            verificationDelay: .milliseconds(10),
+            fallbackSettleDelay: .milliseconds(15)
+        )
+        defer { fallbackSwitchingService.stop() }
+        fallbackSwitchingService.configure(
+            enabled: true,
+            defaultEnglishInputSourceID: nil,
+            rules: [weChatRule]
+        )
+
+        fallbackBackend.frontmostApp = terminalApp
+        await fallbackSwitchingService.performSwitchForTesting(terminalApp)
+        check(
+            fallbackBackend.currentKeyboardInputSourceID() == "com.apple.keylayout.US",
+            "Start in Terminal with US English before opening Spotlight"
+        )
+
+        fallbackBackend.spotlightState = .activeFocusedElement
+        await fallbackSwitchingService.performSpotlightCheckForTesting()
+        check(
+            fallbackBackend.currentKeyboardInputSourceID() == "com.apple.keylayout.US",
+            "Open Spotlight (.activeFocusedElement) over Terminal in US English"
+        )
+
+        fallbackBackend.selectedIDs.removeAll()
+        fallbackBackend.recordedSpotlightStates.removeAll()
+        fallbackBackend.frontmostApp = weChatApp
+        fallbackBackend.queuedSpotlightStates = [.activeFallbackWindow, .inactive]
+        await fallbackSwitchingService.performSwitchForTesting(weChatApp)
+        check(
+            fallbackBackend.recordedSpotlightStates.first == .activeFallbackWindow &&
+            fallbackBackend.recordedSpotlightStates.last == .inactive &&
+            fallbackBackend.currentKeyboardInputSourceID() == "com.apple.inputmethod.SCIM.ITABC" &&
+            fallbackBackend.selectedIDs == ["com.apple.inputmethod.SCIM.ITABC"],
+            "Launching WeChat from Spotlight while panel fades through .activeFallbackWindow -> .inactive recovers after fallbackSettleDelay and switches to Pinyin"
+        )
+
         print("Provider model, discovery, migration, Keychain, SQLite FTS5, Obsidian, Input Source Switching, and single-file iCloud query checks passed")
     }
 }
@@ -975,11 +1098,19 @@ private final class MockInputSourceBackend: InputSourceBackend {
     var asciiLayoutSourceID: String?
     var frontmostApp: RunningAppSnapshot?
     var accessibilityTrusted = true
-    var spotlightActive = false
+    var spotlightState: SpotlightActivityState = .inactive
+    var queuedSpotlightStates: [SpotlightActivityState] = []
+    var onSelectOrNextSpotlightState: ((Bool) -> SpotlightActivityState)?
+    var recordedSpotlightStates: [SpotlightActivityState] = []
     var selectedIDs: [String] = []
     var revertNextSelectionToSourceID: String?
     var refuseSelection = false
     var recordedStatuses: [InputSourceSwitchingStatus] = []
+
+    var spotlightActive: Bool {
+        get { spotlightState != .inactive }
+        set { spotlightState = newValue ? .activeFocusedElement : .inactive }
+    }
 
     init(
         sources: [KeyboardInputSource],
@@ -1027,8 +1158,26 @@ private final class MockInputSourceBackend: InputSourceBackend {
         accessibilityTrusted
     }
 
+    func spotlightActivityState(wasSpotlightActive: Bool) -> SpotlightActivityState {
+        guard accessibilityTrusted else {
+            recordedSpotlightStates.append(.inactive)
+            return .inactive
+        }
+        let resolvedState: SpotlightActivityState
+        if let onSelectOrNextSpotlightState {
+            resolvedState = onSelectOrNextSpotlightState(wasSpotlightActive)
+        } else if !queuedSpotlightStates.isEmpty {
+            resolvedState = queuedSpotlightStates.removeFirst()
+            spotlightState = resolvedState
+        } else {
+            resolvedState = spotlightState
+        }
+        recordedSpotlightStates.append(resolvedState)
+        return resolvedState
+    }
+
     func isSpotlightActive(wasSpotlightActive: Bool) -> Bool {
-        accessibilityTrusted && spotlightActive
+        spotlightActivityState(wasSpotlightActive: wasSpotlightActive) != .inactive
     }
 }
 

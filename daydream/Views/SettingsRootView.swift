@@ -489,6 +489,12 @@ private struct GeneralSettingsView: View {
             .padding(.top, 28)
             .padding(.bottom, 32)
         }
+        .onAppear {
+            appModel.ensureCredentialsLoaded(for: appModel.settings.provider)
+            if appModel.discoveredModels[appModel.settings.provider.rawValue] == nil {
+                appModel.refreshProviderModels(appModel.settings.provider)
+            }
+        }
     }
 
     private var syncStatusText: String {
@@ -1105,6 +1111,9 @@ private struct ClipboardHistorySettingsView: View {
             .padding(.horizontal, 28)
             .padding(.top, 28)
             .padding(.bottom, 32)
+        }
+        .task {
+            await appModel.loadClipboardHistoryIfNeeded()
         }
         .alert("Delete All Clipboard History?", isPresented: $showingDeleteAllConfirmation) {
             Button("Delete All", role: .destructive) {

@@ -963,7 +963,13 @@ final class AppModel {
         }
     }
 
+    func loadClipboardHistoryIfNeeded() async {
+        guard !hasLoadedClipboardHistory else { return }
+        await reloadClipboardHistory(resetSelection: true)
+    }
+
     func pruneClipboardHistoryForCurrentRetention() {
+        lastPrunedRetention = settings.clipboardHistoryRetention
         Task { @MainActor [weak self] in
             guard let self else { return }
             await self.clipboardHistoryService.prunePersistedEntries()
@@ -1119,6 +1125,7 @@ final class AppModel {
         guard settings.memoryEnabled else { return }
         let combinedLength = userText.count + assistantText.count
         guard combinedLength >= 80 else { return }
+        ensureCredentialsLoaded(for: settings.provider)
 
         do {
             let summary = try await openAIClient.generateText(
@@ -1190,15 +1197,12 @@ final class AppModel {
         memoryEntries = Array(memoryEntries.sorted { $0.updatedAt > $1.updatedAt }.prefix(limit))
     }
 
-    // Refreshes the application's diagnostics.
-    func refreshDiagnostics() async {
+    private func refreshLightweightDiagnostics() {
         diagnostics.accessibilityTrusted = selectionService.isAccessibilityTrusted()
         diagnostics.iCloudPasswordsAutomationStatus = iCloudPasswordsAutomationStatus.displayText
         diagnostics.inputSourceSwitchingStatus = inputSourceSwitchingStatus.displayText
         diagnostics.logFilePath = logger.logFileURL.path
-        diagnostics.logText = await logger.readLogTail()
         diagnostics.versionLogFilePath = gitVersionService.versionLogFileURL.path
-        diagnostics.versionLogText = await gitVersionService.readVersionLogTail()
         diagnostics.settingsFilePath = settingsStore.fileURL.path
         diagnostics.iCloudSyncAvailable = iCloudSyncService.isAvailable
         diagnostics.iCloudSyncDirectoryPath = iCloudSyncService.iCloudDirectory?.path ?? ""
@@ -1213,7 +1217,19 @@ final class AppModel {
         diagnostics.registeredHotKeys.append("Move Window to Next Monitor  \(settings.moveWindowShortcut.displayString)")
         diagnostics.hotKeyIssues = hotKeyIssues
         diagnostics.lastExternalApp = lastExternalApplication?.displayName ?? "Unknown"
-        diagnostics.gitVersion = await gitVersionService.captureSnapshot()
+    }
+
+    // Refreshes the application's diagnostics.
+    func refreshDiagnostics() async {
+        refreshLightweightDiagnostics()
+        diagnostics.logText = await logger.readLogTail()
+        let gitSnapshot = await gitVersionService.captureSnapshot()
+        if !hasRecordedLaunchVersionMarker {
+            hasRecordedLaunchVersionMarker = true
+            await gitVersionService.recordVersionMarker(reason: "launch", snapshot: gitSnapshot)
+        }
+        diagnostics.versionLogText = await gitVersionService.readVersionLogTail()
+        diagnostics.gitVersion = gitSnapshot
         diagnostics.gitCommitHistory = await gitVersionService.captureCommitHistory()
     }
 
@@ -1240,6 +1256,7 @@ final class AppModel {
 
         do {
             let target = try resolveTargetApplication(trigger: trigger)
+            ensureCredentialsLoaded(for: settings.provider)
             let requestSettings = settings
             let model = command.effectiveModel(defaultModel: requestSettings.defaultModel)
             let reasoningMode = commandReasoningMode(for: command, model: model)
@@ -1682,17 +1699,21 @@ final class AppModel {
     }
 
     private func recordClipboardEntry(_ entry: ClipboardHistoryEntry) {
-        if selectedClipboardEntryID == nil {
-            selectedClipboardEntryID = entry.id
-        }
-        if selectedClipboardEntryID == entry.id {
-            selectedClipboardEntryDetail = entry
+        if hasLoadedClipboardHistory {
+            if selectedClipboardEntryID == nil {
+                selectedClipboardEntryID = entry.id
+            }
+            if selectedClipboardEntryID == entry.id {
+                selectedClipboardEntryDetail = entry
+            }
         }
 
         Task {
             await clipboardHistoryService.upsert(entry)
             await clipboardHistoryService.prunePersistedEntries()
-            await reloadClipboardHistory()
+            if hasLoadedClipboardHistory {
+                await reloadClipboardHistory()
+            }
         }
 
         Task {
@@ -1745,6 +1766,7 @@ final class AppModel {
     }
 
     private func reloadClipboardHistory(resetSelection: Bool = false) async {
+        hasLoadedClipboardHistory = true
         let summaries = await clipboardHistoryService.loadPersistedSummaries(
             searchText: clipboardHistorySearchText,
             filter: clipboardHistorySelectedFilter,

@@ -42,6 +42,12 @@ struct RunningAppSnapshot: Equatable, Sendable {
     }
 }
 
+enum SpotlightActivityState: Equatable, Sendable {
+    case inactive
+    case activeFocusedElement
+    case activeFallbackWindow
+}
+
 @MainActor
 protocol InputSourceBackend {
     func selectableKeyboardInputSources() -> [KeyboardInputSource]
@@ -51,6 +57,7 @@ protocol InputSourceBackend {
     func selectInputSource(id: String) -> OSStatus
     func frontmostApplication() -> RunningAppSnapshot?
     func isAccessibilityTrusted() -> Bool
+    func spotlightActivityState(wasSpotlightActive: Bool) -> SpotlightActivityState
     func isSpotlightActive(wasSpotlightActive: Bool) -> Bool
 }
 
@@ -59,15 +66,13 @@ extension InputSourceBackend {
         false
     }
 
-    func isSpotlightActive(wasSpotlightActive: Bool) -> Bool {
-        false
+    func spotlightActivityState(wasSpotlightActive: Bool) -> SpotlightActivityState {
+        .inactive
     }
-}
 
-fileprivate enum SpotlightActivityDetection: Equatable {
-    case inactive
-    case activePrimaryFocus
-    case activeFallbackWindow
+    func isSpotlightActive(wasSpotlightActive: Bool) -> Bool {
+        spotlightActivityState(wasSpotlightActive: wasSpotlightActive) != .inactive
+    }
 }
 
 @MainActor
@@ -182,11 +187,7 @@ final class CarbonInputSourceBackend: InputSourceBackend {
         AXIsProcessTrusted()
     }
 
-    func isSpotlightActive(wasSpotlightActive: Bool) -> Bool {
-        detectSpotlightActivity(wasSpotlightActive: wasSpotlightActive) != .inactive
-    }
-
-    fileprivate func detectSpotlightActivity(wasSpotlightActive: Bool) -> SpotlightActivityDetection {
+    func spotlightActivityState(wasSpotlightActive: Bool) -> SpotlightActivityState {
         guard AXIsProcessTrusted() else {
             return .inactive
         }
@@ -209,14 +210,14 @@ final class CarbonInputSourceBackend: InputSourceBackend {
             let focusedElement = focusedRef as! AXUIElement
             var focusedPID: pid_t = 0
             if AXUIElementGetPid(focusedElement, &focusedPID) == .success, focusedPID > 0 {
-                return spotlightPIDs.contains(focusedPID) ? .activePrimaryFocus : .inactive
+                return spotlightPIDs.contains(focusedPID) ? .activeFocusedElement : .inactive
             }
         }
 
         // Signal B (Fallback when focused UI element is temporarily nil, e.g. arrowing Spotlight result rows):
         if let frontmostID = NSWorkspace.shared.frontmostApplication?.bundleIdentifier,
            AppSettings.spotlightHostBundleIdentifiers.contains(frontmostID) {
-            return .activePrimaryFocus
+            return .activeFocusedElement
         }
 
         for app in spotlightApps where !app.isHidden {
@@ -323,18 +324,20 @@ final class CarbonInputSourceBackend: InputSourceBackend {
             return []
         }
         let cfArray = value as! CFArray
-        let count = CFArrayGetCount(cfArray)
-        guard count > 0 else { return [] }
-        var elements: [AXUIElement] = []
-        elements.reserveCapacity(count)
-        for index in 0..<count {
-            guard let pointer = CFArrayGetValueAtIndex(cfArray, index) else { continue }
-            let candidate = Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue()
-            if CFGetTypeID(candidate) == AXUIElementGetTypeID() {
-                elements.append(candidate as! AXUIElement)
+        return withExtendedLifetime(cfArray) {
+            let count = CFArrayGetCount(cfArray)
+            guard count > 0 else { return [] }
+            var elements: [AXUIElement] = []
+            elements.reserveCapacity(count)
+            for index in 0..<count {
+                guard let pointer = CFArrayGetValueAtIndex(cfArray, index) else { continue }
+                let candidate = Unmanaged<AnyObject>.fromOpaque(pointer).takeUnretainedValue()
+                if CFGetTypeID(candidate) == AXUIElementGetTypeID() {
+                    elements.append(candidate as! AXUIElement)
+                }
             }
+            return elements
         }
-        return elements
     }
 
     private func enabledSelectableTISInputSources() -> [TISInputSource] {
@@ -387,13 +390,30 @@ final class CarbonInputSourceBackend: InputSourceBackend {
 
 private final class AXObserverCallbackContext: @unchecked Sendable {
     private let lock = NSLock()
-    private weak var service: InputSourceSwitchingService?
+    private weak var _service: InputSourceSwitchingService?
     let pid: pid_t
     let isSpotlightHost: Bool
     private var isInvalidated = false
 
+    var service: InputSourceSwitchingService? {
+        get {
+            lock.lock()
+            defer { lock.unlock() }
+            guard !isInvalidated else { return nil }
+            return _service
+        }
+        set {
+            lock.lock()
+            _service = newValue
+            if newValue == nil {
+                isInvalidated = true
+            }
+            lock.unlock()
+        }
+    }
+
     init(service: InputSourceSwitchingService, pid: pid_t, isSpotlightHost: Bool) {
-        self.service = service
+        self._service = service
         self.pid = pid
         self.isSpotlightHost = isSpotlightHost
     }
@@ -401,7 +421,7 @@ private final class AXObserverCallbackContext: @unchecked Sendable {
     func invalidate() {
         lock.lock()
         isInvalidated = true
-        service = nil
+        _service = nil
         lock.unlock()
     }
 
@@ -409,7 +429,7 @@ private final class AXObserverCallbackContext: @unchecked Sendable {
         lock.lock()
         defer { lock.unlock() }
         guard !isInvalidated else { return nil }
-        return service
+        return _service
     }
 }
 
@@ -439,12 +459,22 @@ private final class AXObserverRegistration: @unchecked Sendable {
         isInvalidated = true
         lock.unlock()
 
+        callbackContext.service = nil
         callbackContext.invalidate()
+        let mainRunLoop = CFRunLoopGetMain()
         CFRunLoopRemoveSource(
-            CFRunLoopGetMain(),
+            mainRunLoop,
             AXObserverGetRunLoopSource(observer),
             .commonModes
         )
+        if !Thread.isMainThread {
+            let retainedObserver = observer
+            let retainedContext = callbackContext
+            CFRunLoopPerformBlock(mainRunLoop, CFRunLoopMode.commonModes.rawValue) {
+                withExtendedLifetime((retainedObserver, retainedContext)) {}
+            }
+            CFRunLoopWakeUp(mainRunLoop)
+        }
     }
 
     deinit {
@@ -655,6 +685,12 @@ final class InputSourceSwitchingService {
         kAXApplicationActivatedNotification,
     ]
 
+    private nonisolated static let requiredObserverNotifications: Set<String> = [
+        kAXFocusedUIElementChangedNotification,
+        kAXWindowCreatedNotification,
+        kAXApplicationActivatedNotification,
+    ]
+
     var onStatusChange: ((InputSourceSwitchingStatus) -> Void)?
     var onAvailableSourcesChange: (([KeyboardInputSource]) -> Void)?
 
@@ -664,6 +700,7 @@ final class InputSourceSwitchingService {
     private let backend: any InputSourceBackend
     private let settleDelay: Duration
     private let verificationDelay: Duration
+    private let fallbackSettleDelay: Duration
     private let ignoredBundleIdentifiers: Set<String>
     private let observerRegistry = ObserverRegistry()
 
@@ -687,12 +724,14 @@ final class InputSourceSwitchingService {
         backend: (any InputSourceBackend)? = nil,
         settleDelay: Duration = .milliseconds(35),
         verificationDelay: Duration = .milliseconds(60),
+        fallbackSettleDelay: Duration = .milliseconds(180),
         ignoredBundleIdentifiers: Set<String>? = nil
     ) {
         self.logger = logger
         self.backend = backend ?? CarbonInputSourceBackend()
         self.settleDelay = settleDelay
         self.verificationDelay = verificationDelay
+        self.fallbackSettleDelay = fallbackSettleDelay
         if let ignoredBundleIdentifiers {
             self.ignoredBundleIdentifiers = Set(
                 ignoredBundleIdentifiers.compactMap(AppSettings.normalizedOptionalIdentifier)
@@ -843,7 +882,7 @@ final class InputSourceSwitchingService {
         updateStatus(computeBaselineStatus())
 
         if !wasEnabled || configurationChangedSinceLastActive {
-            if backend.isSpotlightActive(wasSpotlightActive: isSpotlightOverlayActive) {
+            if backend.spotlightActivityState(wasSpotlightActive: isSpotlightOverlayActive) != .inactive {
                 handleSpotlightActivityEvent()
             } else if let frontmostApp = backend.frontmostApplication(),
                       eligibleBundleIdentifier(for: frontmostApp) != nil {
@@ -868,7 +907,7 @@ final class InputSourceSwitchingService {
         }
         switchTask?.cancel()
         switchTask = Task<Void, Never> { @MainActor [weak self] in
-            await self?.evaluateAndPerformCurrentTargetSwitch(fromSpotlightEvent: true)
+            await self?.evaluateAndPerformCurrentTargetSwitch()
         }
     }
 
@@ -879,7 +918,7 @@ final class InputSourceSwitchingService {
         switchTask?.cancel()
         let task = Task<Void, Never> { @MainActor [weak self] in
             guard let self else { return }
-            await self.evaluateAndPerformCurrentTargetSwitch(fromSpotlightEvent: true)
+            await self.evaluateAndPerformCurrentTargetSwitch()
         }
         switchTask = task
         await task.value
@@ -889,7 +928,7 @@ final class InputSourceSwitchingService {
         guard isEnabled else {
             return
         }
-        if !observerRegistry.hasSpotlightObservers && backend.isAccessibilityTrusted() {
+        if backend.isAccessibilityTrusted() {
             installSpotlightObserversIfNeeded()
         }
         guard let bundleID = eligibleBundleIdentifier(for: app) else {
@@ -906,7 +945,7 @@ final class InputSourceSwitchingService {
         guard isEnabled else {
             return
         }
-        if !observerRegistry.hasSpotlightObservers && backend.isAccessibilityTrusted() {
+        if backend.isAccessibilityTrusted() {
             installSpotlightObserversIfNeeded()
         }
         guard let bundleID = eligibleBundleIdentifier(for: app) else {
@@ -1013,9 +1052,12 @@ final class InputSourceSwitchingService {
         }
 
         let runningSpotlightApps = NSWorkspace.shared.runningApplications.filter { app in
-            !app.isTerminated
-                && app.processIdentifier > 0
-                && AppSettings.spotlightHostBundleIdentifiers.contains(app.bundleIdentifier ?? "")
+            guard !app.isTerminated,
+                  app.processIdentifier > 0,
+                  let bundleID = AppSettings.normalizedOptionalIdentifier(app.bundleIdentifier) else {
+                return false
+            }
+            return AppSettings.spotlightHostBundleIdentifiers.contains(bundleID)
         }
 
         let runningPIDs = Set(runningSpotlightApps.map(\.processIdentifier))
@@ -1044,8 +1086,18 @@ final class InputSourceSwitchingService {
         let context = registration.contextPointer
         let appElement = AXUIElementCreateApplication(pid)
 
+        var hasRequiredNotification = false
         for notification in Self.spotlightAppNotifications {
-            _ = AXObserverAddNotification(observer, appElement, notification as CFString, context)
+            let error = AXObserverAddNotification(observer, appElement, notification as CFString, context)
+            if error == .success,
+               Self.requiredObserverNotifications.contains(notification) {
+                hasRequiredNotification = true
+            }
+        }
+
+        guard hasRequiredNotification else {
+            registration.invalidate()
+            return
         }
 
         for windowElement in CarbonInputSourceBackend.allCandidateWindows(of: appElement) {
@@ -1097,8 +1149,18 @@ final class InputSourceSwitchingService {
         let context = registration.contextPointer
         let appElement = AXUIElementCreateApplication(pid)
 
+        var hasRequiredNotification = false
         for notification in Self.underlyingAppNotifications {
-            _ = AXObserverAddNotification(observer, appElement, notification as CFString, context)
+            let error = AXObserverAddNotification(observer, appElement, notification as CFString, context)
+            if error == .success,
+               Self.requiredObserverNotifications.contains(notification) {
+                hasRequiredNotification = true
+            }
+        }
+
+        guard hasRequiredNotification else {
+            registration.invalidate()
+            return
         }
 
         CFRunLoopAddSource(
@@ -1238,15 +1300,43 @@ final class InputSourceSwitchingService {
     private func performSwitch(for app: RunningAppSnapshot, bundleID: String) async {
         await evaluateAndPerformCurrentTargetSwitch(
             activatedApp: app,
-            activatedBundleID: bundleID,
-            fromSpotlightEvent: false
+            activatedBundleID: bundleID
+        )
+    }
+
+    private func resolvePostSpotlightTarget(
+        pendingApp: RunningAppSnapshot?,
+        frontmostApp: RunningAppSnapshot?
+    ) -> SwitchTarget? {
+        if let pendingApp,
+           let pendingBundleID = eligibleBundleIdentifier(for: pendingApp),
+           pendingBundleID != AppSettings.spotlightBundleIdentifier,
+           let frontmostApp,
+           eligibleBundleIdentifier(for: frontmostApp) == pendingBundleID {
+            let displayName = pendingApp.localizedName.isEmpty
+                ? frontmostApp.localizedName
+                : pendingApp.localizedName
+            return SwitchTarget(
+                bundleID: pendingBundleID,
+                localizedName: displayName,
+                isSpotlight: false
+            )
+        }
+        guard let frontmostApp,
+              let currentBundleID = eligibleBundleIdentifier(for: frontmostApp),
+              currentBundleID != AppSettings.spotlightBundleIdentifier else {
+            return nil
+        }
+        return SwitchTarget(
+            bundleID: currentBundleID,
+            localizedName: frontmostApp.localizedName,
+            isSpotlight: false
         )
     }
 
     private func evaluateAndPerformCurrentTargetSwitch(
         activatedApp: RunningAppSnapshot? = nil,
-        activatedBundleID: String? = nil,
-        fromSpotlightEvent: Bool
+        activatedBundleID: String? = nil
     ) async {
         do {
             try await Task.sleep(for: settleDelay)
@@ -1259,14 +1349,7 @@ final class InputSourceSwitchingService {
         }
 
         let wasSpotlightActive = isSpotlightOverlayActive
-        let spotlightDetection: SpotlightActivityDetection
-        if let carbonBackend = backend as? CarbonInputSourceBackend {
-            spotlightDetection = carbonBackend.detectSpotlightActivity(wasSpotlightActive: wasSpotlightActive)
-        } else {
-            spotlightDetection = backend.isSpotlightActive(wasSpotlightActive: wasSpotlightActive)
-                ? .activePrimaryFocus
-                : .inactive
-        }
+        let spotlightDetection = backend.spotlightActivityState(wasSpotlightActive: wasSpotlightActive)
 
         let frontmostSnapshot = backend.frontmostApplication()
         let frontmostIsSpotlightHost = Self.isSpotlightHostApplication(frontmostSnapshot)
@@ -1277,12 +1360,17 @@ final class InputSourceSwitchingService {
                 return
             }
 
-            let matchedOnlyViaSignalB = wasSpotlightActive
-                && !frontmostIsSpotlightHost
+            let matchedOnlyViaSignalB = !frontmostIsSpotlightHost
                 && spotlightDetection == .activeFallbackWindow
 
             isSpotlightOverlayActive = true
-            pendingActivatedApp = nil
+            if matchedOnlyViaSignalB {
+                if pendingActivatedApp == nil, let activatedApp {
+                    pendingActivatedApp = activatedApp
+                }
+            } else {
+                pendingActivatedApp = nil
+            }
             updateTemporaryUnderlyingAppObserver(frontmostApp: frontmostSnapshot)
 
             let spotlightTarget = SwitchTarget(
@@ -1292,14 +1380,13 @@ final class InputSourceSwitchingService {
             )
             await applyTargetInputSource(for: spotlightTarget)
 
-            // One-shot animation settle re-check on Spotlight dismiss when active only via Signal B.
-            if fromSpotlightEvent,
-               matchedOnlyViaSignalB,
+            // One-shot animation settle re-check when Spotlight is matched only via Signal B fallback window.
+            if matchedOnlyViaSignalB,
                !Task.isCancelled,
                isEnabled,
                isSpotlightOverlayActive {
                 do {
-                    try await Task.sleep(for: .milliseconds(180))
+                    try await Task.sleep(for: fallbackSettleDelay)
                 } catch {
                     return
                 }
@@ -1308,20 +1395,22 @@ final class InputSourceSwitchingService {
                     return
                 }
 
-                let stillActive = backend.isSpotlightActive(wasSpotlightActive: true)
-                    || Self.isSpotlightHostApplication(backend.frontmostApplication())
-                if !stillActive {
+                let postSettleState = backend.spotlightActivityState(wasSpotlightActive: true)
+                let postSettleFrontmost = backend.frontmostApplication()
+                if postSettleState == .inactive && !Self.isSpotlightHostApplication(postSettleFrontmost) {
                     isSpotlightOverlayActive = false
+                    let pendingApp = pendingActivatedApp
+                    pendingActivatedApp = nil
                     observerRegistry.removeTemporaryUnderlyingObserver()
-                    if let currentFrontmost = backend.frontmostApplication(),
-                       let currentBundleID = eligibleBundleIdentifier(for: currentFrontmost) {
-                        let recoveryTarget = SwitchTarget(
-                            bundleID: currentBundleID,
-                            localizedName: currentFrontmost.localizedName,
-                            isSpotlight: false
-                        )
+                    if let recoveryTarget = resolvePostSpotlightTarget(
+                        pendingApp: pendingApp,
+                        frontmostApp: postSettleFrontmost
+                    ) {
                         await applyTargetInputSource(for: recoveryTarget)
                     }
+                } else {
+                    pendingActivatedApp = nil
+                    updateTemporaryUnderlyingAppObserver(frontmostApp: postSettleFrontmost)
                 }
             }
             return
@@ -1366,16 +1455,14 @@ final class InputSourceSwitchingService {
         }
 
         if wasSpotlightActive {
+            let pendingApp = pendingActivatedApp
             pendingActivatedApp = nil
-            guard let currentFrontmost = frontmostSnapshot,
-                  let currentBundleID = eligibleBundleIdentifier(for: currentFrontmost) else {
+            guard let recoveryTarget = resolvePostSpotlightTarget(
+                pendingApp: pendingApp,
+                frontmostApp: frontmostSnapshot
+            ) else {
                 return
             }
-            let recoveryTarget = SwitchTarget(
-                bundleID: currentBundleID,
-                localizedName: currentFrontmost.localizedName,
-                isSpotlight: false
-            )
             await applyTargetInputSource(for: recoveryTarget)
             return
         }
@@ -1400,11 +1487,12 @@ final class InputSourceSwitchingService {
     }
 
     private func isTargetStillCurrent(_ target: SwitchTarget) -> Bool {
+        let spotlightActive = backend.spotlightActivityState(wasSpotlightActive: isSpotlightOverlayActive) != .inactive
+            || Self.isSpotlightHostApplication(backend.frontmostApplication())
         if target.isSpotlight {
-            return backend.isSpotlightActive(wasSpotlightActive: isSpotlightOverlayActive)
-                || Self.isSpotlightHostApplication(backend.frontmostApplication())
+            return spotlightActive
         }
-        guard !backend.isSpotlightActive(wasSpotlightActive: isSpotlightOverlayActive),
+        guard !spotlightActive,
               let frontmost = backend.frontmostApplication(),
               eligibleBundleIdentifier(for: frontmost) == target.bundleID else {
             return false

@@ -264,12 +264,12 @@ struct MenuBarLabelView: View {
                     .font(.system(size: 15))
                     .scaleEffect(animateStrength ? 1.08 : 0.9)
                     .rotationEffect(.degrees(animateStrength ? -8 : 8))
+                    .animation(.easeInOut(duration: 0.48).repeatForever(autoreverses: true), value: animateStrength)
             } else {
                 Image(systemName: "figure.martial.arts")
                     .symbolRenderingMode(.hierarchical)
             }
         }
-        .animation(.easeInOut(duration: 0.48).repeatForever(autoreverses: true), value: animateStrength)
         .onAppear {
             animateStrength = appModel.isExecuting
         }
