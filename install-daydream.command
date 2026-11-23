@@ -13,8 +13,34 @@ readonly SIGNING_DIRECTORY="$SCRIPT_DIR/.daydream-signing"
 readonly FINGERPRINT_FILE="$SIGNING_DIRECTORY/daydream-local-code-signing.sha1"
 readonly LOGIN_KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
+readonly PBXPROJ_PATH="$PROJECT_PATH/project.pbxproj"
+
 BUILD_ROOT="$(mktemp -d "${TMPDIR:-/tmp}/daydream-build.XXXXXX")"
-trap 'rm -rf "$BUILD_ROOT"' EXIT
+PBXPROJ_BACKUP=""
+BUILD_COMPLETED=0
+
+cleanup() {
+    if [[ "$BUILD_COMPLETED" -eq 0 && -n "$PBXPROJ_BACKUP" && -f "$PBXPROJ_BACKUP" ]]; then
+        /bin/cp "$PBXPROJ_BACKUP" "$PBXPROJ_PATH"
+    fi
+    rm -rf "$BUILD_ROOT"
+}
+trap cleanup EXIT
+
+find_gh_cli() {
+    if command -v gh >/dev/null 2>&1; then
+        command -v gh
+        return
+    fi
+    local candidate
+    for candidate in /opt/homebrew/bin/gh /usr/local/bin/gh; do
+        if [[ -x "$candidate" ]]; then
+            print -r -- "$candidate"
+            return
+        fi
+    done
+    return 1
+}
 
 is_complete_developer_dir() {
     [[ -x "$1/usr/bin/xcodebuild" && -d "$1/Platforms/MacOSX.platform" ]]
@@ -78,8 +104,65 @@ export DEVELOPER_DIR
 readonly XCODEBUILD="$DEVELOPER_DIR/usr/bin/xcodebuild"
 readonly BUILT_APP="$BUILD_ROOT/Build/Products/Release/$APP_NAME.app"
 
+VERSION_INFO="$(/usr/bin/python3 - "$PBXPROJ_PATH" "${DAYDREAM_SKIP_BUMP:-0}" "${DAYDREAM_VERSION:-}" <<'PY'
+import pathlib, re, sys
+
+pbxproj = pathlib.Path(sys.argv[1])
+skip_bump = sys.argv[2] == "1"
+override_version = sys.argv[3].strip()
+text = pbxproj.read_text()
+
+version_match = re.search(r'MARKETING_VERSION = ([^;]+);', text)
+build_match = re.search(r'CURRENT_PROJECT_VERSION = (\d+);', text)
+if not version_match or not build_match:
+    sys.exit("Error: Could not find MARKETING_VERSION or CURRENT_PROJECT_VERSION in project.pbxproj")
+
+current_version = version_match.group(1).strip()
+current_build = int(build_match.group(1))
+
+if skip_bump:
+    next_version = override_version or current_version
+    next_build = current_build
+else:
+    if override_version:
+        next_version = override_version
+    else:
+        parts = current_version.split(".")
+        if len(parts) == 3 and all(p.isdigit() for p in parts):
+            parts[2] = str(int(parts[2]) + 1)
+            next_version = ".".join(parts)
+        elif len(parts) == 2 and all(p.isdigit() for p in parts):
+            next_version = f"{parts[0]}.{parts[1]}.1"
+        else:
+            next_version = current_version
+    next_build = current_build + 1
+
+print(f"{current_version} {current_build} {next_version} {next_build}")
+PY
+)"
+read -r CURRENT_VERSION CURRENT_BUILD APP_VERSION APP_BUILD <<< "$VERSION_INFO"
+
+if [[ "${DAYDREAM_SKIP_BUMP:-0}" != "1" ]]; then
+    PBXPROJ_BACKUP="$BUILD_ROOT/project.pbxproj.bak"
+    /bin/cp "$PBXPROJ_PATH" "$PBXPROJ_BACKUP"
+    /usr/bin/python3 - "$PBXPROJ_PATH" "$APP_VERSION" "$APP_BUILD" <<'PY'
+import pathlib, re, sys
+
+pbxproj = pathlib.Path(sys.argv[1])
+next_version = sys.argv[2]
+next_build = sys.argv[3]
+text = pbxproj.read_text()
+text = re.sub(r'MARKETING_VERSION = [^;]+;', f'MARKETING_VERSION = {next_version};', text)
+text = re.sub(r'CURRENT_PROJECT_VERSION = \d+;', f'CURRENT_PROJECT_VERSION = {next_build};', text)
+pbxproj.write_text(text)
+PY
+    print -- "Bumped version: $CURRENT_VERSION ($CURRENT_BUILD) -> $APP_VERSION ($APP_BUILD)"
+else
+    print -- "Version: $APP_VERSION ($APP_BUILD) (bump skipped)"
+fi
+
 print -- "Using Xcode: ${DEVELOPER_DIR%/Contents/Developer}"
-print -- "Building $APP_NAME in Release configuration..."
+print -- "Building $APP_NAME $APP_VERSION ($APP_BUILD) in Release configuration..."
 
 "$XCODEBUILD" \
     -project "$PROJECT_PATH" \
@@ -162,9 +245,44 @@ print -- "Opening $APP_NAME..."
 /usr/bin/open "$INSTALL_PATH"
 
 "$SCRIPT_DIR/verify-daydream-idle.command"
+BUILD_COMPLETED=1
+
+RELEASE_URL=""
+if [[ "${DAYDREAM_SKIP_RELEASE:-0}" != "1" ]]; then
+    if GH_CLI="$(find_gh_cli)" && "$GH_CLI" auth status >/dev/null 2>&1; then
+        if [[ -d "$SCRIPT_DIR/.git" ]] && ! /usr/bin/git -C "$SCRIPT_DIR" diff --quiet -- "daydream.xcodeproj/project.pbxproj"; then
+            print -- "Committing version bump ($APP_VERSION build $APP_BUILD)..."
+            /usr/bin/git -C "$SCRIPT_DIR" add -- "daydream.xcodeproj/project.pbxproj"
+            /usr/bin/git -C "$SCRIPT_DIR" commit -m "Bump version to $APP_VERSION ($APP_BUILD)" -- "daydream.xcodeproj/project.pbxproj"
+            CURRENT_BRANCH="$(/usr/bin/git -C "$SCRIPT_DIR" rev-parse --abbrev-ref HEAD)"
+            /usr/bin/git -C "$SCRIPT_DIR" push origin "$CURRENT_BRANCH"
+        fi
+
+        RELEASE_TAG="v$APP_VERSION"
+        if "$GH_CLI" release view "$RELEASE_TAG" --repo Fenc3s/daydream >/dev/null 2>&1; then
+            RELEASE_TAG="v${APP_VERSION}-b${APP_BUILD}"
+        fi
+
+        RELEASE_ARCHIVE="$BUILD_ROOT/${APP_NAME}-${RELEASE_TAG}-${HOST_ARCHITECTURE}.zip"
+        print -- "Packaging $APP_NAME for GitHub Release ($RELEASE_TAG)..."
+        /usr/bin/ditto -c -k --sequesterRsrc --keepParent "$INSTALL_PATH" "$RELEASE_ARCHIVE"
+
+        print -- "Publishing GitHub Release $RELEASE_TAG..."
+        RELEASE_URL="$("$GH_CLI" release create "$RELEASE_TAG" "$RELEASE_ARCHIVE" \
+            --repo Fenc3s/daydream \
+            --title "Daydream v$APP_VERSION (Build $APP_BUILD)" \
+            --generate-notes)"
+    else
+        print -- "Skipping GitHub Release: gh CLI is not installed or not authenticated."
+    fi
+fi
 
 print -- ""
 print -- "Build and installation completed successfully."
 print -- "Installed application: $INSTALL_PATH"
+print -- "Version: $APP_VERSION ($APP_BUILD)"
 print -- "Signing identity: $SIGNING_FINGERPRINT"
 print -- "$INSTALLED_REQUIREMENT"
+if [[ -n "$RELEASE_URL" ]]; then
+    print -- "GitHub Release: $RELEASE_URL"
+fi
