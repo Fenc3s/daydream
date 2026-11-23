@@ -17,10 +17,11 @@ struct SettingsRootView: View {
             }
             .navigationSplitViewColumnWidth(min: 205, ideal: 220, max: 245)
             .listStyle(.sidebar)
+            .toolbar(removing: .sidebarToggle)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     Divider()
-                        .opacity(0.5)
+                        .opacity(0.45)
                     HStack(spacing: 6) {
                         Text("Daydream")
                             .font(.caption.weight(.medium))
@@ -28,12 +29,12 @@ struct SettingsRootView: View {
                         Spacer()
                         Text(appModel.applicationVersionDisplay)
                             .font(.caption2.monospacedDigit())
-                            .foregroundStyle(.tertiary)
-                            .padding(.horizontal, 6)
+                            .foregroundStyle(.secondary)
+                            .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(
                                 Capsule(style: .continuous)
-                                    .fill(Color.primary.opacity(0.05))
+                                    .fill(Color.primary.opacity(0.08))
                             )
                     }
                     .padding(.horizontal, 16)
@@ -264,7 +265,7 @@ private struct VersionHistorySettingsView: View {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.bordered)
-                .controlSize(.regular)
+                .controlSize(.small)
             }
 
             settingsSection(title: "Application") {
@@ -272,6 +273,7 @@ private struct VersionHistorySettingsView: View {
                     settingsRow("Version") {
                         Text(appModel.applicationVersionDisplay)
                             .font(.body.monospacedDigit())
+                            .foregroundStyle(.secondary)
                             .textSelection(.enabled)
                     }
 
@@ -285,7 +287,7 @@ private struct VersionHistorySettingsView: View {
                                 .padding(.vertical, 3)
                                 .background(
                                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                        .fill(Color.primary.opacity(0.05))
+                                        .fill(Color.primary.opacity(0.06))
                                 )
                                 .textSelection(.enabled)
                         }
@@ -294,6 +296,7 @@ private struct VersionHistorySettingsView: View {
 
                         settingsRow("Branch") {
                             Text(appModel.diagnostics.gitVersion.branch)
+                                .foregroundStyle(.secondary)
                                 .textSelection(.enabled)
                         }
 
@@ -315,7 +318,7 @@ private struct VersionHistorySettingsView: View {
                             : appModel.diagnostics.gitVersion.availabilityMessage)
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 8)
                     }
                 }
             }
@@ -326,7 +329,7 @@ private struct VersionHistorySettingsView: View {
                         Text("No Git commit history is available.")
                             .font(.subheadline)
                             .foregroundStyle(.secondary)
-                            .padding(.vertical, 10)
+                            .padding(.vertical, 8)
                     } else {
                         ForEach(Array(appModel.diagnostics.gitCommitHistory.enumerated()), id: \.offset) { index, commit in
                             if index > 0 {
@@ -377,7 +380,7 @@ private struct VersionHistorySettingsView: View {
                     .padding(.vertical, 3)
                     .background(
                         RoundedRectangle(cornerRadius: 5, style: .continuous)
-                            .fill(Color.primary.opacity(0.05))
+                            .fill(Color.primary.opacity(0.06))
                     )
                     .textSelection(.enabled)
 
@@ -386,7 +389,7 @@ private struct VersionHistorySettingsView: View {
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.vertical, 8)
+            .padding(.vertical, 7)
         } else {
             Text(commit)
                 .font(.system(.callout, design: .monospaced))
@@ -422,7 +425,7 @@ private struct GeneralSettingsView: View {
                         }
                         .pickerStyle(.segmented)
                         .labelsHidden()
-                        .frame(maxWidth: 320, alignment: .leading)
+                        .frame(width: 280)
                     }
 
                     Divider()
@@ -441,6 +444,7 @@ private struct GeneralSettingsView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 340)
                         }
 
                         Divider()
@@ -457,6 +461,7 @@ private struct GeneralSettingsView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 340)
                         }
 
                     case .deepSeek:
@@ -472,6 +477,7 @@ private struct GeneralSettingsView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 340)
                         }
 
                         Divider()
@@ -488,59 +494,57 @@ private struct GeneralSettingsView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 340)
                         }
 
                     case .chatGPT:
-                        settingsRow("ChatGPT Account", alignment: .top) {
-                            VStack(alignment: .leading, spacing: 8) {
+                        VStack(alignment: .leading, spacing: 6) {
+                            settingsRow(
+                                "ChatGPT Account",
+                                subtitle: appModel.chatGPTAuthSession != nil
+                                    ? "Uses your ChatGPT plan via OAuth + PKCE. Tokens refresh automatically."
+                                    : "Authenticate in your browser to use your ChatGPT Plus or Pro plan without an API key."
+                            ) {
                                 if appModel.isSigningInWithChatGPT {
-                                    HStack(spacing: 10) {
+                                    HStack(spacing: 8) {
                                         ProgressView()
                                             .controlSize(.small)
-                                        Text("Waiting for browser sign-in…")
+                                        Text("Waiting for browser…")
+                                            .font(.callout)
                                             .foregroundStyle(.secondary)
-                                        Spacer()
                                         Button("Cancel") {
                                             appModel.cancelChatGPTSignIn()
                                         }
                                     }
                                 } else if let session = appModel.chatGPTAuthSession {
-                                    HStack(spacing: 10) {
+                                    HStack(spacing: 8) {
                                         SettingsStatusPill(
-                                            text: "Signed in as \(session.displayIdentity)",
+                                            text: session.displayIdentity,
                                             color: session.hasDirectPlanUsageScope ? .green : .orange
                                         )
-                                        Spacer()
                                         Button("Sign Out") {
                                             appModel.signOutOfChatGPT()
                                         }
                                     }
-
-                                    Text("Uses your ChatGPT plan via Sign in with ChatGPT (OAuth + PKCE). Tokens refresh automatically.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
                                 } else {
                                     Button("Sign in with ChatGPT") {
                                         appModel.signInWithChatGPT()
                                     }
                                     .buttonStyle(.borderedProminent)
-
-                                    Text("Authenticate in your browser to use your ChatGPT Plus or Pro plan without an API key.")
-                                        .font(.caption)
-                                        .foregroundStyle(.secondary)
                                 }
+                            }
 
-                                if let statusMessage = appModel.chatGPTAuthStatusMessage,
-                                   !statusMessage.isEmpty {
-                                    Text(statusMessage)
-                                        .font(.caption)
-                                        .foregroundStyle(
-                                            appModel.chatGPTAuthSession == nil && !appModel.isSigningInWithChatGPT
-                                                ? .red
-                                                : .secondary
-                                        )
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
+                            if let statusMessage = appModel.chatGPTAuthStatusMessage,
+                               !statusMessage.isEmpty {
+                                Text(statusMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(
+                                        appModel.chatGPTAuthSession == nil && !appModel.isSigningInWithChatGPT
+                                            ? .red
+                                            : .secondary
+                                    )
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.bottom, 6)
                             }
                         }
                     }
@@ -564,29 +568,26 @@ private struct GeneralSettingsView: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
-                        .frame(maxWidth: 380, alignment: .leading)
+                        .fixedSize()
                     }
 
                     Divider()
 
-                    settingsRow("Default Reasoning", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Picker("", selection: Binding(
-                                get: { appModel.defaultReasoningMode(for: appModel.settings.defaultModel) },
-                                set: { appModel.selectDefaultReasoning($0) }
-                            )) {
-                                ForEach(appModel.availableReasoningModes(for: appModel.settings.defaultModel)) { mode in
-                                    Text(mode.displayName).tag(mode)
-                                }
+                    settingsRow(
+                        "Default Reasoning",
+                        subtitle: "Saved separately per default model and used by commands with default reasoning."
+                    ) {
+                        Picker("", selection: Binding(
+                            get: { appModel.defaultReasoningMode(for: appModel.settings.defaultModel) },
+                            set: { appModel.selectDefaultReasoning($0) }
+                        )) {
+                            ForEach(appModel.availableReasoningModes(for: appModel.settings.defaultModel)) { mode in
+                                Text(mode.displayName).tag(mode)
                             }
-                            .labelsHidden()
-                            .pickerStyle(.menu)
-                            .frame(maxWidth: 220, alignment: .leading)
-
-                            Text("Saved separately for the selected default model. Used by commands that use default reasoning.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
                         }
+                        .labelsHidden()
+                        .pickerStyle(.menu)
+                        .fixedSize()
                     }
                 }
             }
@@ -600,13 +601,11 @@ private struct GeneralSettingsView: View {
             settingsSection(title: "Permissions") {
                 settingsGroup {
                     settingsRow("Accessibility") {
-                        HStack(spacing: 10) {
+                        HStack(spacing: 8) {
                             SettingsStatusPill(
                                 text: appModel.diagnostics.accessibilityTrusted ? "Granted" : "Required",
                                 color: appModel.diagnostics.accessibilityTrusted ? .green : .orange
                             )
-
-                            Spacer()
 
                             if !appModel.diagnostics.accessibilityTrusted {
                                 Button("Request Access") {
@@ -622,54 +621,45 @@ private struct GeneralSettingsView: View {
 
                     Divider()
 
-                    settingsRow("iCloud Passwords", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            Toggle(
-                                "Enable verification automation for browsers",
-                                isOn: Binding(
-                                    get: { appModel.settings.iCloudPasswordsDiaAutomationEnabled },
-                                    set: { appModel.setICloudPasswordsDiaAutomationEnabled($0) }
-                                )
+                    settingsRow(
+                        "iCloud Passwords for Browsers",
+                        subtitle: "\(appModel.iCloudPasswordsAutomationStatus.displayText) · Completes verification after clicking the plugin in Dia, Chrome, or Chrome Canary."
+                    ) {
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { appModel.settings.iCloudPasswordsDiaAutomationEnabled },
+                                set: { appModel.setICloudPasswordsDiaAutomationEnabled($0) }
                             )
-
-                            Text(appModel.iCloudPasswordsAutomationStatus.displayText)
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Text("Waits for an iCloud Passwords plugin click in Dia, Google Chrome, or Google Chrome Canary and completes verification if required. It does not open the extension when a browser launches.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-                        }
+                        )
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Enable iCloud Passwords verification automation for browsers")
                     }
                 }
             }
 
             settingsSection(title: "Window Management") {
                 settingsGroup {
-                    settingsRow("Move Window to Next Monitor", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            HStack(spacing: 10) {
-                                ShortcutRecorderField(
-                                    shortcut: appModel.settings.moveWindowShortcut,
-                                    hasConflict: appModel.hotKeyConflicts.contains(AppModel.moveWindowShortcutID),
-                                    allowsClearing: false
-                                ) { shortcut in
-                                    appModel.settings.moveWindowShortcut = shortcut ?? AppSettings.defaultMoveWindowShortcut
-                                    appModel.saveSettings(reloadHotKeys: true)
-                                }
-
-                                Spacer()
-
-                                Button("Reset to Default") {
-                                    appModel.settings.moveWindowShortcut = AppSettings.defaultMoveWindowShortcut
-                                    appModel.saveSettings(reloadHotKeys: true)
-                                }
-                                .disabled(appModel.settings.moveWindowShortcut == AppSettings.defaultMoveWindowShortcut)
+                    settingsRow(
+                        "Move Window to Next Monitor",
+                        subtitle: "Moves the focused window of the frontmost application to the next display."
+                    ) {
+                        HStack(spacing: 8) {
+                            ShortcutRecorderField(
+                                shortcut: appModel.settings.moveWindowShortcut,
+                                hasConflict: appModel.hotKeyConflicts.contains(AppModel.moveWindowShortcutID),
+                                allowsClearing: false
+                            ) { shortcut in
+                                appModel.settings.moveWindowShortcut = shortcut ?? AppSettings.defaultMoveWindowShortcut
+                                appModel.saveSettings(reloadHotKeys: true)
                             }
 
-                            Text("Moves the focused window of the frontmost application to the next monitor.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                            Button("Reset") {
+                                appModel.settings.moveWindowShortcut = AppSettings.defaultMoveWindowShortcut
+                                appModel.saveSettings(reloadHotKeys: true)
+                            }
+                            .disabled(appModel.settings.moveWindowShortcut == AppSettings.defaultMoveWindowShortcut)
                         }
                     }
                 }
@@ -701,12 +691,16 @@ private struct ProviderModelCatalogEditor: View {
     let appModel: AppModel
     let provider: AIProvider
 
+    @Environment(\.colorScheme) private var colorScheme
     @State private var newModel = ""
     @State private var modelSearch = ""
     @State private var reasoningTarget: ModelReasoningTarget?
 
     var body: some View {
-        settingsSection(title: "\(provider.displayName) Models") {
+        settingsSection(
+            title: "\(provider.displayName) Models",
+            subtitle: appModel.modelCatalogStatus[provider.rawValue] ?? "Refresh to discover models from this provider."
+        ) {
             HStack(spacing: 8) {
                 if appModel.refreshingModelProviders.contains(provider.rawValue) {
                     ProgressView().controlSize(.small)
@@ -719,11 +713,6 @@ private struct ProviderModelCatalogEditor: View {
             }
         } content: {
             settingsGroup {
-                Text(appModel.modelCatalogStatus[provider.rawValue] ?? "Refresh to discover models from this provider.")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .padding(.bottom, 10)
-
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(Array(catalog.enumerated()), id: \.element) { index, model in
                         if index > 0 {
@@ -733,19 +722,19 @@ private struct ProviderModelCatalogEditor: View {
                             VStack(alignment: .leading, spacing: 3) {
                                 HStack(spacing: 7) {
                                     Text(model)
-                                        .font(.system(.body, design: .monospaced))
+                                        .font(.system(.body, design: .monospaced, weight: .medium))
                                         .lineLimit(1)
                                         .truncationMode(.middle)
 
                                     if model == appModel.settings.defaultModel(for: provider) {
                                         Text("Default")
                                             .font(.caption2.weight(.semibold))
-                                            .foregroundStyle(Color.accentColor)
+                                            .foregroundStyle(colorScheme == .dark ? Color.white.opacity(0.92) : Color.accentColor)
                                             .padding(.horizontal, 7)
                                             .padding(.vertical, 2)
                                             .background(
                                                 Capsule(style: .continuous)
-                                                    .fill(Color.accentColor.opacity(0.12))
+                                                    .fill(Color.accentColor.opacity(colorScheme == .dark ? 0.35 : 0.14))
                                             )
                                     }
                                 }
@@ -761,8 +750,8 @@ private struct ProviderModelCatalogEditor: View {
                             Button("Reasoning…") {
                                 reasoningTarget = ModelReasoningTarget(model: model)
                             }
-                            .buttonStyle(.borderless)
-                            .foregroundStyle(Color.accentColor)
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
                             .accessibilityLabel("Configure reasoning efforts for \(model)")
                             .help("Define the reasoning effort levels offered for this model")
 
@@ -782,12 +771,36 @@ private struct ProviderModelCatalogEditor: View {
                 }
 
                 Divider()
-                    .padding(.vertical, 8)
+                    .padding(.vertical, 10)
 
-                VStack(alignment: .leading, spacing: 10) {
-                    SettingsSearchField(placeholder: "Search available models", text: $modelSearch)
+                // Unified inset browser: search header + discovered model rows in a single container
+                VStack(alignment: .leading, spacing: 0) {
+                    HStack(spacing: 7) {
+                        Image(systemName: "magnifyingglass")
+                            .font(.system(size: 12))
+                            .foregroundStyle(.secondary)
+
+                        TextField("Search available models", text: $modelSearch)
+                            .textFieldStyle(.plain)
+
+                        if !modelSearch.isEmpty {
+                            Button {
+                                modelSearch = ""
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.system(size: 12))
+                                    .foregroundStyle(.tertiary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityLabel("Clear search")
+                        }
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 7)
 
                     if !filteredDiscoveredModels.isEmpty {
+                        Divider()
+
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 0) {
                                 ForEach(Array(filteredDiscoveredModels.enumerated()), id: \.element) { index, model in
@@ -796,7 +809,8 @@ private struct ProviderModelCatalogEditor: View {
                                     }
                                     HStack(spacing: 8) {
                                         Text(model)
-                                            .font(.system(.caption, design: .monospaced))
+                                            .font(.system(.callout, design: .monospaced))
+                                            .foregroundStyle(.primary.opacity(0.9))
                                             .lineLimit(1)
                                             .truncationMode(.middle)
                                         Spacer()
@@ -811,22 +825,28 @@ private struct ProviderModelCatalogEditor: View {
                                 }
                             }
                         }
-                        .frame(maxHeight: 200)
-                        .background(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .fill(Color.primary.opacity(0.025))
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.5), lineWidth: 0.5)
-                        )
+                        .frame(maxHeight: 190)
                     } else if !modelSearch.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                        Divider()
+
                         Text("No discovered models match “\(modelSearch)”.")
                             .font(.caption)
                             .foregroundStyle(.secondary)
-                            .padding(.vertical, 4)
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 10)
                     }
                 }
+                .background(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(colorScheme == .dark ? Color.black.opacity(0.18) : Color.primary.opacity(0.025))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .strokeBorder(
+                            colorScheme == .dark ? Color.white.opacity(0.10) : Color(nsColor: .separatorColor).opacity(0.55),
+                            lineWidth: 0.5
+                        )
+                )
 
                 Divider()
                     .padding(.top, 10)
@@ -835,6 +855,7 @@ private struct ProviderModelCatalogEditor: View {
                     HStack(spacing: 8) {
                         TextField(modelPlaceholder, text: $newModel)
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 260)
                             .onSubmit(addModel)
 
                         Button("Add") {
@@ -1013,17 +1034,24 @@ private struct MemorySettingsView: View {
 
             settingsSection(title: "AI Memory") {
                 settingsGroup {
-                    Toggle(
-                        "Remember useful context from AI Commands",
-                        isOn: Binding(
-                            get: { appModel.settings.memoryEnabled },
-                            set: {
-                                appModel.settings.memoryEnabled = $0
-                                appModel.saveSettings()
-                            }
+                    settingsRow(
+                        "Remember Context",
+                        subtitle: "Memories are stored locally in Application Support and injected only when relevant."
+                    ) {
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { appModel.settings.memoryEnabled },
+                                set: {
+                                    appModel.settings.memoryEnabled = $0
+                                    appModel.saveSettings()
+                                }
+                            )
                         )
-                    )
-                    .padding(.vertical, 8)
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Remember useful context from AI Commands")
+                    }
 
                     Divider()
 
@@ -1042,17 +1070,8 @@ private struct MemorySettingsView: View {
                             Text("\(appModel.settings.memoryLimit)")
                                 .monospacedDigit()
                         }
-                        .frame(maxWidth: 160, alignment: .leading)
+                        .fixedSize()
                     }
-
-                    Divider()
-
-                    Text("Memories are stored locally in Application Support and injected only as compact context when they match a command selection.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
                 }
             }
 
@@ -1134,7 +1153,7 @@ private struct MemoryRow: View {
                 .frame(width: 24, height: 24)
                 .background(
                     RoundedRectangle(cornerRadius: 6, style: .continuous)
-                        .fill(Color.primary.opacity(0.05))
+                        .fill(Color.primary.opacity(0.06))
                 )
                 .padding(.top, 2)
 
@@ -1154,7 +1173,7 @@ private struct MemoryRow: View {
                         .padding(.vertical, 2)
                         .background(
                             Capsule(style: .continuous)
-                                .fill(Color.primary.opacity(0.05))
+                                .fill(Color.primary.opacity(0.06))
                         )
                     Text(memory.updatedAt.formatted(.dateTime.month().day().hour().minute()))
                 }
@@ -1291,7 +1310,10 @@ private struct ClipboardHistorySettingsView: View {
 
             settingsSection(title: "Retention") {
                 settingsGroup {
-                    settingsRow("Saved History") {
+                    settingsRow(
+                        "Saved History",
+                        subtitle: "Clipboard history is persisted locally and pruned automatically."
+                    ) {
                         Picker(
                             "",
                             selection: Binding(
@@ -1309,35 +1331,23 @@ private struct ClipboardHistorySettingsView: View {
                         }
                         .pickerStyle(.menu)
                         .labelsHidden()
-                        .frame(maxWidth: 220, alignment: .leading)
+                        .fixedSize()
                     }
-
-                    Divider()
-
-                    Text("Clipboard history is persisted locally and pruned automatically based on the selected retention window.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.top, 10)
-                        .padding(.bottom, 2)
                 }
             }
 
             settingsSection(title: "Shortcut") {
                 settingsGroup {
-                    settingsRow("Global Shortcut", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
-                            ShortcutRecorderField(
-                                shortcut: appModel.settings.clipboardHistoryShortcut,
-                                hasConflict: appModel.hotKeyConflicts.contains(AppModel.clipboardHistoryShortcutID)
-                            ) { shortcut in
-                                appModel.settings.clipboardHistoryShortcut = shortcut
-                                appModel.saveSettings(reloadHotKeys: true)
-                            }
-
-                            Text("Use a global shortcut to open the Clipboard History window from anywhere.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
+                    settingsRow(
+                        "Global Shortcut",
+                        subtitle: "Open the Clipboard History window from anywhere."
+                    ) {
+                        ShortcutRecorderField(
+                            shortcut: appModel.settings.clipboardHistoryShortcut,
+                            hasConflict: appModel.hotKeyConflicts.contains(AppModel.clipboardHistoryShortcutID)
+                        ) { shortcut in
+                            appModel.settings.clipboardHistoryShortcut = shortcut
+                            appModel.saveSettings(reloadHotKeys: true)
                         }
                     }
                 }
@@ -1345,19 +1355,14 @@ private struct ClipboardHistorySettingsView: View {
 
             settingsSection(title: "Data") {
                 settingsGroup {
-                    settingsRow("Local History") {
-                        HStack(spacing: 10) {
-                            Text("Permanently removes all saved clipboard entries on this Mac.")
-                                .font(.caption)
-                                .foregroundStyle(.secondary)
-
-                            Spacer()
-
-                            Button("Delete All History", role: .destructive) {
-                                showingDeleteAllConfirmation = true
-                            }
-                            .disabled(appModel.clipboardHistoryEntries.isEmpty)
+                    settingsRow(
+                        "Local History",
+                        subtitle: "Permanently deletes all saved clipboard entries on this Mac."
+                    ) {
+                        Button("Delete All History", role: .destructive) {
+                            showingDeleteAllConfirmation = true
                         }
+                        .disabled(appModel.clipboardHistoryEntries.isEmpty)
                     }
                 }
             }
@@ -1471,14 +1476,14 @@ struct SettingsPageContainer<Content: View>: View {
 
     var body: some View {
         ScrollView {
-            VStack(alignment: .leading, spacing: 24) {
+            VStack(alignment: .leading, spacing: 20) {
                 content()
             }
             .frame(maxWidth: 780, alignment: .leading)
             .frame(maxWidth: .infinity, alignment: .center)
             .padding(.horizontal, 28)
-            .padding(.top, 20)
-            .padding(.bottom, 36)
+            .padding(.top, 4)
+            .padding(.bottom, 32)
         }
     }
 }
@@ -1500,7 +1505,7 @@ struct SettingsPageHeader<Trailing: View>: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 12) {
-            VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(title)
                     .font(.system(size: 24, weight: .bold))
                 Text(subtitle)
@@ -1521,6 +1526,7 @@ struct SettingsStatusPill: View {
     let color: Color
 
     @Environment(\.appearsActive) private var appearsActive
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1536,15 +1542,22 @@ struct SettingsStatusPill: View {
         .padding(.vertical, 4)
         .background(
             Capsule(style: .continuous)
-                .fill(color.opacity(appearsActive ? 0.13 : 0.08))
+                .fill(color.opacity(pillOpacity))
         )
         .foregroundStyle(appearsActive ? .primary : .secondary)
+    }
+
+    private var pillOpacity: Double {
+        if !appearsActive { return 0.09 }
+        return colorScheme == .dark ? 0.20 : 0.13
     }
 }
 
 struct SettingsSearchField: View {
     let placeholder: String
     @Binding var text: String
+
+    @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         HStack(spacing: 7) {
@@ -1571,11 +1584,14 @@ struct SettingsSearchField: View {
         .padding(.vertical, 6)
         .background(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .fill(Color(nsColor: .textBackgroundColor))
+                .fill(colorScheme == .dark ? Color.black.opacity(0.18) : Color(nsColor: .textBackgroundColor))
         )
         .overlay(
             RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .strokeBorder(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+                .strokeBorder(
+                    colorScheme == .dark ? Color.white.opacity(0.10) : Color(nsColor: .separatorColor).opacity(0.65),
+                    lineWidth: 0.75
+                )
         )
     }
 }
@@ -1601,29 +1617,87 @@ struct SettingsKeycapBadge: View {
     }
 }
 
+struct SettingsGroupCard<Content: View>: View {
+    @Environment(\.colorScheme) private var colorScheme
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            content
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(cardFill)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(cardBorder, lineWidth: 0.5)
+        )
+    }
+
+    private var cardFill: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(0.048)
+        }
+        return Color(nsColor: .controlBackgroundColor)
+    }
+
+    private var cardBorder: Color {
+        if colorScheme == .dark {
+            return Color.white.opacity(0.11)
+        }
+        return Color.black.opacity(0.09)
+    }
+}
+
 func settingsSection<Content: View>(
     title: String,
+    subtitle: String? = nil,
     @ViewBuilder content: () -> Content
 ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-        Text(title)
-            .font(.headline)
-            .padding(.leading, 4)
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title)
+                .font(.headline)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.leading, 4)
+
         content()
     }
 }
 
 func settingsSection<Trailing: View, Content: View>(
     title: String,
+    subtitle: String? = nil,
     @ViewBuilder trailing: () -> Trailing,
     @ViewBuilder content: () -> Content
 ) -> some View {
     VStack(alignment: .leading, spacing: 8) {
-        HStack(alignment: .center, spacing: 8) {
-            Text(title)
-                .font(.headline)
-                .padding(.leading, 4)
+        HStack(alignment: .bottom, spacing: 8) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.headline)
+                if let subtitle, !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.leading, 4)
+
             Spacer()
+
             trailing()
         }
         content()
@@ -1633,33 +1707,31 @@ func settingsSection<Trailing: View, Content: View>(
 func settingsGroup<Content: View>(
     @ViewBuilder content: () -> Content
 ) -> some View {
-    VStack(alignment: .leading, spacing: 0) {
+    SettingsGroupCard {
         content()
     }
-    .padding(.horizontal, 16)
-    .padding(.vertical, 12)
-    .background(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .fill(Color(nsColor: .controlBackgroundColor))
-    )
-    .overlay(
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(Color(nsColor: .separatorColor).opacity(0.55), lineWidth: 0.5)
-    )
 }
 
 func settingsRow<Content: View>(
     _ label: String,
+    subtitle: String? = nil,
     alignment: VerticalAlignment = .center,
     @ViewBuilder content: () -> Content
 ) -> some View {
     HStack(alignment: alignment, spacing: 20) {
-        Text(label)
-            .font(.body)
-            .frame(width: 176, alignment: .leading)
-            .padding(.top, alignment == .top ? 2 : 0)
+        VStack(alignment: .leading, spacing: 3) {
+            Text(label)
+                .font(.body)
+            if let subtitle, !subtitle.isEmpty {
+                Text(subtitle)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+
         content()
-            .frame(maxWidth: .infinity, alignment: .leading)
     }
     .frame(maxWidth: .infinity, alignment: .leading)
     .padding(.vertical, 8)
@@ -1705,6 +1777,8 @@ private struct CommandEditorView: View {
     let appModel: AppModel
     let commandIndex: Int
 
+    @Environment(\.colorScheme) private var colorScheme
+
     private var command: AICommand {
         appModel.settings.commands[commandIndex]
     }
@@ -1718,16 +1792,18 @@ private struct CommandEditorView: View {
 
             settingsSection(title: "Identity") {
                 settingsGroup {
-                    settingsRow("Command ID", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 6) {
+                    VStack(alignment: .leading, spacing: 4) {
+                        settingsRow("Command ID") {
                             TextField("Command ID", text: binding(\.commandID))
                                 .textFieldStyle(.roundedBorder)
+                                .frame(maxWidth: 300)
+                        }
 
-                            if appModel.duplicateCommandIdentifiers.contains(command.id) {
-                                Label("This ID is duplicated. Keep command IDs unique.", systemImage: "exclamationmark.triangle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-                            }
+                        if appModel.duplicateCommandIdentifiers.contains(command.id) {
+                            Label("This ID is duplicated. Keep command IDs unique.", systemImage: "exclamationmark.triangle.fill")
+                                .font(.caption)
+                                .foregroundStyle(.orange)
+                                .padding(.bottom, 6)
                         }
                     }
 
@@ -1736,13 +1812,14 @@ private struct CommandEditorView: View {
                     settingsRow("Command Title") {
                         TextField("Command Title", text: binding(\.title))
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
                     }
                 }
             }
 
             settingsSection(title: "Shortcut") {
                 settingsGroup {
-                    settingsRow("Global Shortcut", alignment: .top) {
+                    settingsRow("Global Shortcut") {
                         ShortcutRecorderField(
                             shortcut: command.shortcut,
                             hasConflict: appModel.hotKeyConflicts.contains(command.id)
@@ -1756,75 +1833,93 @@ private struct CommandEditorView: View {
 
             settingsSection(title: "Model & Reasoning") {
                 settingsGroup {
-                    settingsRow("Model", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle(
-                                "Use default model",
-                                isOn: Binding(
-                                    get: { command.resolvedModel == nil },
-                                    set: { useDefault in
-                                        appModel.settings.commands[commandIndex].modelOverride = useDefault ? nil : appModel.settings.defaultModel
+                    settingsRow("Use Default Model") {
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { command.resolvedModel == nil },
+                                set: { useDefault in
+                                    appModel.settings.commands[commandIndex].modelOverride = useDefault ? nil : appModel.settings.defaultModel
+                                    appModel.saveSettings()
+                                }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Use default model")
+                    }
+
+                    if command.resolvedModel != nil {
+                        Divider()
+
+                        settingsRow("Override Model") {
+                            Picker(
+                                "",
+                                selection: Binding(
+                                    get: { appModel.settings.commands[commandIndex].modelOverride ?? appModel.settings.defaultModel },
+                                    set: {
+                                        appModel.settings.commands[commandIndex].modelOverride = $0
                                         appModel.saveSettings()
                                     }
                                 )
-                            )
-
-                            if command.resolvedModel != nil {
-                                Picker(
-                                    "",
-                                    selection: Binding(
-                                        get: { appModel.settings.commands[commandIndex].modelOverride ?? appModel.settings.defaultModel },
-                                        set: {
-                                            appModel.settings.commands[commandIndex].modelOverride = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
-                                ) {
-                                    ForEach(availableModels, id: \.self) { model in
-                                        Text(model).tag(model)
-                                    }
+                            ) {
+                                ForEach(availableModels, id: \.self) { model in
+                                    Text(model).tag(model)
                                 }
-                                .pickerStyle(.menu)
-                                .labelsHidden()
-                                .frame(maxWidth: 340, alignment: .leading)
                             }
+                            .pickerStyle(.menu)
+                            .labelsHidden()
+                            .fixedSize()
                         }
                     }
 
                     Divider()
 
-                    settingsRow("Reasoning", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Use default reasoning", isOn: binding(\.useDefaultReasoning))
-
-                            if command.useDefaultReasoning {
-                                Text("Default: \(appModel.defaultReasoningMode(for: command.effectiveModel(defaultModel: appModel.settings.defaultModel)).displayName)")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
-
-                            Picker("", selection: reasoningModeBinding) {
-                                ForEach(availableReasoningModes) { mode in
-                                    Text(mode.displayName).tag(mode)
-                                }
-                            }
-                            .pickerStyle(.menu)
+                    settingsRow(
+                        "Use Default Reasoning",
+                        subtitle: command.useDefaultReasoning
+                            ? "Currently \(appModel.defaultReasoningMode(for: command.effectiveModel(defaultModel: appModel.settings.defaultModel)).displayName)"
+                            : nil
+                    ) {
+                        Toggle("", isOn: binding(\.useDefaultReasoning))
                             .labelsHidden()
-                            .frame(maxWidth: 220, alignment: .leading)
-                            .disabled(command.useDefaultReasoning)
-                            .help("Auto uses the provider default. Available effort levels depend on the selected model.")
+                            .toggleStyle(.switch)
+                            .accessibilityLabel("Use default reasoning")
+                    }
+
+                    Divider()
+
+                    settingsRow("Reasoning Effort") {
+                        Picker("", selection: reasoningModeBinding) {
+                            ForEach(availableReasoningModes) { mode in
+                                Text(mode.displayName).tag(mode)
+                            }
                         }
+                        .pickerStyle(.menu)
+                        .labelsHidden()
+                        .fixedSize()
+                        .disabled(command.useDefaultReasoning)
+                        .help("Auto uses the provider default. Available effort levels depend on the selected model.")
                     }
                 }
             }
 
             settingsSection(title: "Output") {
                 settingsGroup {
-                    settingsRow("Completion", alignment: .top) {
-                        VStack(alignment: .leading, spacing: 8) {
-                            Toggle("Show popup after completion", isOn: binding(\.showPopup))
-                            Toggle("Save to Obsidian", isOn: binding(\.saveToObsidian))
-                        }
+                    settingsRow("Show Popup After Completion") {
+                        Toggle("", isOn: binding(\.showPopup))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .accessibilityLabel("Show popup after completion")
+                    }
+
+                    Divider()
+
+                    settingsRow("Save to Obsidian") {
+                        Toggle("", isOn: binding(\.saveToObsidian))
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .accessibilityLabel("Save to Obsidian")
                     }
 
                     if command.saveToObsidian {
@@ -1832,7 +1927,7 @@ private struct CommandEditorView: View {
 
                         settingsRow("Obsidian Vault") {
                             TextField(
-                                "Obsidian Vault Name or Path",
+                                "Vault Name or Path",
                                 text: Binding(
                                     get: { appModel.settings.obsidianVaultName },
                                     set: {
@@ -1842,28 +1937,27 @@ private struct CommandEditorView: View {
                                 )
                             )
                             .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
                         }
 
                         Divider()
 
-                        settingsRow("Note Subfolder", alignment: .top) {
-                            VStack(alignment: .leading, spacing: 6) {
-                                TextField(
-                                    "Optional subfolder",
-                                    text: Binding(
-                                        get: { appModel.settings.obsidianSubfolder },
-                                        set: {
-                                            appModel.settings.obsidianSubfolder = $0
-                                            appModel.saveSettings()
-                                        }
-                                    )
+                        settingsRow(
+                            "Note Subfolder",
+                            subtitle: "Writes Markdown directly to the local Vault folder in the background without stealing focus."
+                        ) {
+                            TextField(
+                                "Optional subfolder",
+                                text: Binding(
+                                    get: { appModel.settings.obsidianSubfolder },
+                                    set: {
+                                        appModel.settings.obsidianSubfolder = $0
+                                        appModel.saveSettings()
+                                    }
                                 )
-                                .textFieldStyle(.roundedBorder)
-
-                                Text("Writes Markdown directly to the local Vault folder in the background without stealing focus, falling back to obsidian:// when needed.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                            }
+                            )
+                            .textFieldStyle(.roundedBorder)
+                            .frame(maxWidth: 300)
                         }
                     }
                 }
@@ -1890,11 +1984,14 @@ private struct CommandEditorView: View {
                             .frame(minHeight: 240)
                             .background(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .fill(Color(nsColor: .textBackgroundColor))
+                                    .fill(colorScheme == .dark ? Color.black.opacity(0.22) : Color(nsColor: .textBackgroundColor))
                             )
                             .overlay(
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                    .strokeBorder(Color(nsColor: .separatorColor).opacity(0.65), lineWidth: 0.75)
+                                    .strokeBorder(
+                                        colorScheme == .dark ? Color.white.opacity(0.10) : Color(nsColor: .separatorColor).opacity(0.65),
+                                        lineWidth: 0.75
+                                    )
                             )
                     }
                     .padding(.vertical, 4)
@@ -1974,12 +2071,12 @@ private struct TokenChip: View {
             .padding(.vertical, 4)
             .background(
                 Capsule(style: .continuous)
-                    .fill(isHovering ? Color.accentColor.opacity(0.12) : Color.primary.opacity(0.055))
+                    .fill(isHovering ? Color.accentColor.opacity(0.16) : Color.primary.opacity(0.065))
             )
             .overlay(
                 Capsule(style: .continuous)
                     .strokeBorder(
-                        isHovering ? Color.accentColor.opacity(0.35) : Color(nsColor: .separatorColor).opacity(0.45),
+                        isHovering ? Color.accentColor.opacity(0.4) : Color(nsColor: .separatorColor).opacity(0.45),
                         lineWidth: 0.5
                     )
             )

@@ -50,47 +50,51 @@ struct InputSourceSettingsView: View {
     private var automaticSwitchingSection: some View {
         settingsSection(title: "Automatic Switching") {
             settingsGroup {
-                settingsRow("Input Source Switching", alignment: .top) {
-                    VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 6) {
+                    settingsRow(
+                        "Switch by Active App",
+                        subtitle: "Uses your default English layout globally—including Spotlight—and switches automatically for apps below. Keep macOS’s “Automatically switch to a document’s input source” off in System Settings → Keyboard."
+                    ) {
                         Toggle(
-                            "Automatically switch input source by active app",
+                            "",
                             isOn: Binding(
                                 get: { appModel.settings.inputSourceSwitchingEnabled },
                                 set: { appModel.setInputSourceSwitchingEnabled($0) }
                             )
                         )
+                        .labelsHidden()
+                        .toggleStyle(.switch)
+                        .accessibilityLabel("Automatically switch input source by active app")
+                    }
 
-                        Text(appModel.inputSourceSwitchingStatus.displayText)
-                            .font(.caption)
-                            .foregroundStyle(isWarningStatus ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                    Text(appModel.inputSourceSwitchingStatus.displayText)
+                        .font(.caption)
+                        .foregroundStyle(isWarningStatus ? AnyShapeStyle(.orange) : AnyShapeStyle(.secondary))
+                        .padding(.bottom, 4)
 
-                        Text("Uses your default English keyboard layout globally—including when opening Spotlight—and switches automatically for apps configured below. Standard app switching requires no permissions; Spotlight detection uses Accessibility permission. For best results, keep macOS’s “Automatically switch to a document’s input source” turned off in System Settings → Keyboard.")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-
-                        if !appModel.diagnostics.accessibilityTrusted && appModel.settings.inputSourceSwitchingEnabled {
-                            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                                Image(systemName: "exclamationmark.triangle.fill")
-                                    .font(.caption)
-                                    .foregroundStyle(.orange)
-
-                                Text("Grant Accessibility permission to enable automatic switching when opening and closing Spotlight.")
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-
-                                Button("Grant Permission") {
-                                    appModel.promptForAccessibilityPermission()
-                                }
-                                .buttonStyle(.link)
+                    if !appModel.diagnostics.accessibilityTrusted && appModel.settings.inputSourceSwitchingEnabled {
+                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
                                 .font(.caption)
+                                .foregroundStyle(.orange)
 
-                                Button("Open Settings") {
-                                    appModel.openAccessibilitySettings()
-                                }
-                                .buttonStyle(.link)
+                            Text("Grant Accessibility permission to enable automatic switching when opening and closing Spotlight.")
                                 .font(.caption)
+                                .foregroundStyle(.secondary)
+
+                            Button("Grant Permission") {
+                                appModel.promptForAccessibilityPermission()
                             }
+                            .buttonStyle(.link)
+                            .font(.caption)
+
+                            Button("Open Settings") {
+                                appModel.openAccessibilitySettings()
+                            }
+                            .buttonStyle(.link)
+                            .font(.caption)
                         }
+                        .padding(.bottom, 4)
                     }
                 }
 
@@ -117,7 +121,7 @@ struct InputSourceSettingsView: View {
                     .pickerStyle(.menu)
                     .labelsHidden()
                     .accessibilityLabel("Default English input source")
-                    .frame(maxWidth: 280, alignment: .leading)
+                    .fixedSize()
                 }
             }
         }
