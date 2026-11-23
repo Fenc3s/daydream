@@ -1,5 +1,8 @@
 import AppKit
+import ApplicationServices
 import Carbon
+import CoreGraphics
+import Darwin
 import Foundation
 
 @main
@@ -1087,7 +1090,592 @@ struct ProviderModelTests {
             "Launching WeChat from Spotlight while panel fades through .activeFallbackWindow -> .inactive recovers after fallbackSettleDelay and switches to Pinyin"
         )
 
-        print("Provider model, discovery, migration, Keychain, SQLite FTS5, Obsidian, Input Source Switching, and single-file iCloud query checks passed")
+        try await runWindowMoverTests()
+
+        print("Provider model, discovery, migration, Keychain, SQLite FTS5, Obsidian, Input Source Switching, Window Mover, and single-file iCloud query checks passed")
+    }
+
+    private static func runWindowMoverTests() async throws {
+        func check(_ value: @autoclosure () -> Bool, _ message: String) {
+            precondition(value(), message)
+        }
+        let primaryMaxY: CGFloat = 1_440
+        let lg1 = ScreenGeometry(
+            name: "LG UltraFine (1)",
+            accessibilityFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: 0, y: 0, width: 2_560, height: 1_440),
+                primaryScreenMaxY: primaryMaxY
+            ),
+            accessibilityVisibleFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: 0, y: 0, width: 2_506, height: 1_410),
+                primaryScreenMaxY: primaryMaxY
+            )
+        )
+        let builtIn = ScreenGeometry(
+            name: "Built-in Retina Display",
+            accessibilityFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: -401, y: -982, width: 1_512, height: 982),
+                primaryScreenMaxY: primaryMaxY
+            ),
+            accessibilityVisibleFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: -401, y: -982, width: 1_512, height: 950),
+                primaryScreenMaxY: primaryMaxY
+            )
+        )
+        let lg2 = ScreenGeometry(
+            name: "LG UltraFine (2)",
+            accessibilityFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: -2_304, y: 0, width: 2_304, height: 1_296),
+                primaryScreenMaxY: primaryMaxY
+            ),
+            accessibilityVisibleFrame: ScreenGeometry.accessibilityFrame(
+                from: CGRect(x: -2_304, y: 0, width: 2_304, height: 1_296),
+                primaryScreenMaxY: primaryMaxY
+            )
+        )
+
+        check(
+            lg1.accessibilityFrame == CGRect(x: 0, y: 0, width: 2_560, height: 1_440) &&
+            lg1.accessibilityVisibleFrame == CGRect(x: 0, y: 30, width: 2_506, height: 1_410) &&
+            builtIn.accessibilityFrame == CGRect(x: -401, y: 1_440, width: 1_512, height: 982) &&
+            builtIn.accessibilityVisibleFrame == CGRect(x: -401, y: 1_472, width: 1_512, height: 950) &&
+            lg2.accessibilityFrame == CGRect(x: -2_304, y: 144, width: 2_304, height: 1_296) &&
+            lg2.accessibilityVisibleFrame == CGRect(x: -2_304, y: 144, width: 2_304, height: 1_296),
+            "ScreenGeometry converts AppKit rects to Quartz/AX top-left coordinates"
+        )
+
+        let ordered = WindowMoverService.orderedScreens(from: [lg1, builtIn, lg2])
+        check(
+            ordered.map(\.name) == ["LG UltraFine (2)", "Built-in Retina Display", "LG UltraFine (1)"],
+            "orderedScreens sorts displays deterministically by minX then minY"
+        )
+
+        let fastTiming = WindowMoverTimingConfiguration(
+            pollInterval: .milliseconds(5),
+            exitFullScreenTimeout: .milliseconds(120),
+            enterFullScreenTimeout: .milliseconds(120),
+            targetScreenSettleTimeout: .milliseconds(40),
+            preFullScreenEntrySettleDelay: .milliseconds(5),
+            actionRetryInterval: .milliseconds(25),
+            requiredStablePolls: 3
+        )
+
+        // 1. Standard window move + oversized clamping + maximized window on secondary display
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, builtIn, lg2])
+            let app = WindowTargetApp(processIdentifier: 101, bundleIdentifier: "com.apple.optimus", localizedName: "Optimus")
+            backend.frontmostApp = app
+            let win = backend.makeWindow(
+                id: 1,
+                frame: CGRect(x: 500, y: 230, width: 1_200, height: 800),
+                fullScreen: false
+            )
+            backend.focusedElement = win
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let firstMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                firstMove == WindowMoveResult(
+                    applicationName: "Optimus",
+                    sourceScreenName: "LG UltraFine (1)",
+                    targetScreenName: "LG UltraFine (2)",
+                    mode: .standard
+                ),
+                "Standard window on LG 1 wraps around to LG 2"
+            )
+            check(
+                backend.windowsByID[1]?.frame.size == CGSize(width: 1_200, height: 800) &&
+                backend.setSizeCalls.isEmpty &&
+                backend.setFullScreenCalls.isEmpty,
+                "Standard window that fits target preserves exact size with zero resize or fullscreen calls"
+            )
+
+            // Oversized window (2200x1300) moving from LG 2 (2304x1296) -> Built-in (1512x950 visible)
+            backend.windowsByID[1]?.frame = CGRect(x: -2_250, y: 144, width: 2_200, height: 1_296)
+            backend.postMoveSizeDrift = CGSize(width: 1_600, height: 980)
+            let clampedMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                clampedMove == WindowMoveResult(
+                    applicationName: "Optimus",
+                    sourceScreenName: "LG UltraFine (2)",
+                    targetScreenName: "Built-in Retina Display",
+                    mode: .standard
+                ),
+                "Oversized desktop window moves from LG 2 to Built-in"
+            )
+            let landedFrame = backend.windowsByID[1]!.frame
+            check(
+                landedFrame == CGRect(x: -401, y: 1_472, width: 1_512, height: 950) &&
+                WindowMoverService.screenIndex(containing: landedFrame, in: ordered) == 1,
+                "size -> position -> size clamps oversized window into Built-in visibleFrame and fixes post-move size drift"
+            )
+
+            // Maximized standard window on LG 2 (where accessibilityFrame == accessibilityVisibleFrame) stays .standard
+            backend.windowsByID[1]?.frame = lg2.accessibilityFrame
+            let maximizedMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                maximizedMove.mode == .standard &&
+                backend.windowsByID[1]?.frame == builtIn.accessibilityVisibleFrame,
+                "Maximized AXStandardWindow on display without menu bar stays .standard and respects target notch inset"
+            )
+        }
+
+        // 2. Borderless / non-native fullscreen move across all 3 displays (including chrome-free LG 2)
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, builtIn, lg2])
+            let app = WindowTargetApp(processIdentifier: 102, bundleIdentifier: "com.googlecode.iterm2", localizedName: "iTerm2")
+            backend.frontmostApp = app
+            let win = backend.makeWindow(
+                id: 2,
+                frame: lg1.accessibilityFrame,
+                fullScreen: false,
+                hasFullScreenButton: false,
+                hasStandardButtons: false
+            )
+            backend.focusedElement = win
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let result1 = try await service.moveFocusedWindowToNextScreen()
+            check(
+                result1.mode == .borderlessFullScreen &&
+                backend.windowsByID[2]?.frame == lg2.accessibilityFrame &&
+                backend.setFullScreenCalls.isEmpty,
+                "Borderless fullscreen window covering menu bar/Dock relocates directly to LG 2 full frame"
+            )
+
+            // Second press from chrome-free LG 2 (frame == visibleFrame) to notched Built-in STILL stays .borderlessFullScreen
+            let result2 = try await service.moveFocusedWindowToNextScreen()
+            check(
+                result2.mode == .borderlessFullScreen &&
+                backend.windowsByID[2]?.frame == builtIn.accessibilityFrame &&
+                backend.setFullScreenCalls.isEmpty,
+                "Borderless fullscreen window without titlebar buttons stays .borderlessFullScreen on chrome-free display"
+            )
+        }
+
+        // 3. Native Fullscreen 3-display cycle + AXEnhancedUserInterface save/restore + transient focus retention
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, builtIn, lg2])
+            let chrome = WindowTargetApp(processIdentifier: 201, bundleIdentifier: "com.google.Chrome", localizedName: "Google Chrome")
+            let finder = WindowTargetApp(processIdentifier: 202, bundleIdentifier: "com.apple.finder", localizedName: "Finder")
+            backend.frontmostApp = chrome
+            backend.enhancedUIEnabledByPID[chrome.processIdentifier] = true
+
+            let win = backend.makeWindow(
+                id: 10,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 220, y: 120, width: 1_738, height: 1_038),
+                fullScreen: true,
+                exitTransitionTicks: 3,
+                enterTransitionTicks: 2
+            )
+            backend.focusedElement = win
+            backend.transientFrontmostSwitchDuringExit = finder
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+
+            // Move 1: LG 1 -> LG 2
+            let move1 = try await service.moveFocusedWindowToNextScreen()
+            check(
+                move1 == WindowMoveResult(
+                    applicationName: "Google Chrome",
+                    sourceScreenName: "LG UltraFine (1)",
+                    targetScreenName: "LG UltraFine (2)",
+                    mode: .nativeFullScreen
+                ),
+                "Native fullscreen window moves from LG 1 to LG 2"
+            )
+            check(
+                backend.windowsByID[10]?.fullScreen == true &&
+                backend.windowsByID[10]?.isPositionSettable == false &&
+                WindowMoverService.screenIndex(containing: backend.windowsByID[10]!.frame, in: ordered) == 0 &&
+                backend.enhancedUIEnabledByPID[chrome.processIdentifier] == true &&
+                backend.enhancedUICalls == [false, true] &&
+                backend.activatedPIDs.contains(chrome.processIdentifier) &&
+                !service.isMoveInProgress,
+                "Native fullscreen move re-enters fullscreen on LG 2, restores AXEnhancedUserInterface, and re-activates drifted app"
+            )
+
+            // Move 2: LG 2 -> Built-in Retina Display
+            let move2 = try await service.moveFocusedWindowToNextScreen()
+            check(
+                move2 == WindowMoveResult(
+                    applicationName: "Google Chrome",
+                    sourceScreenName: "LG UltraFine (2)",
+                    targetScreenName: "Built-in Retina Display",
+                    mode: .nativeFullScreen
+                ) &&
+                backend.windowsByID[10]?.fullScreen == true &&
+                WindowMoverService.screenIndex(containing: backend.windowsByID[10]!.frame, in: ordered) == 1,
+                "Native fullscreen window moves from LG 2 to smaller Built-in display and re-enters fullscreen on Built-in"
+            )
+
+            // Move 3: Built-in Retina Display (notched fullscreen frame) -> LG 1
+            let move3 = try await service.moveFocusedWindowToNextScreen()
+            check(
+                move3 == WindowMoveResult(
+                    applicationName: "Google Chrome",
+                    sourceScreenName: "Built-in Retina Display",
+                    targetScreenName: "LG UltraFine (1)",
+                    mode: .nativeFullScreen
+                ) &&
+                backend.windowsByID[10]?.fullScreen == true &&
+                WindowMoverService.screenIndex(containing: backend.windowsByID[10]!.frame, in: ordered) == 2,
+                "Native fullscreen window completes 3-display cycle back to LG 1"
+            )
+        }
+
+        // 4. Focused window unwrapping (NSToolbarFullScreenWindow, floating palette, AXMainWindow/AXWindows fallbacks, Finder Desktop rejection)
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, lg2])
+            let safari = WindowTargetApp(processIdentifier: 301, bundleIdentifier: "com.apple.Safari", localizedName: "Safari")
+            backend.frontmostApp = safari
+
+            let fsWindow = backend.makeWindow(
+                id: 20,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 200, y: 120, width: 1_280, height: 820),
+                fullScreen: true,
+                exitTransitionTicks: 1,
+                enterTransitionTicks: 1
+            )
+            let toolbarGroup = backend.makeElement(
+                id: 21,
+                role: kAXGroupRole as String,
+                subrole: nil,
+                containingWindow: fsWindow
+            )
+            backend.focusedElement = toolbarGroup
+            backend.mainElement = fsWindow
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let toolbarMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                toolbarMove.mode == .nativeFullScreen &&
+                toolbarMove.targetScreenName == "LG UltraFine (2)" &&
+                backend.windowsByID[20]?.fullScreen == true,
+                "Unwraps NSToolbarFullScreenWindow (AXGroup) to underlying fullscreen AXWindow"
+            )
+
+            // Floating palette focused while mainWindow is fullscreen on LG 2
+            let floatingPanel = backend.makeWindow(
+                id: 22,
+                subrole: kAXFloatingWindowSubrole as String,
+                frame: CGRect(x: -1_800, y: 220, width: 320, height: 240),
+                fullScreen: false
+            )
+            backend.focusedElement = floatingPanel
+            backend.mainElement = fsWindow
+            let paletteMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                paletteMove.mode == .nativeFullScreen &&
+                paletteMove.targetScreenName == "LG UltraFine (1)",
+                "Prefers fullscreen mainWindow when focused element is a non-fullscreen floating auxiliary panel"
+            )
+
+            // focusedWindow == nil and mainWindow == nil -> falls back to AXWindows skipping AXScrollArea Desktop and minimized windows
+            let desktopScrollArea = backend.makeElement(
+                id: 23,
+                role: kAXScrollAreaRole as String,
+                subrole: nil,
+                containingWindow: nil
+            )
+            let minimizedWin = backend.makeWindow(
+                id: 24,
+                frame: CGRect(x: 100, y: 100, width: 800, height: 600),
+                fullScreen: false,
+                minimized: true
+            )
+            backend.focusedElement = nil
+            backend.mainElement = nil
+            backend.windowList = [desktopScrollArea, minimizedWin, fsWindow]
+            let fallbackMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                fallbackMove.mode == .nativeFullScreen &&
+                fallbackMove.targetScreenName == "LG UltraFine (2)",
+                "Falls back to AXWindows selecting fullscreen AXWindow while skipping AXScrollArea and minimized windows"
+            )
+
+            // Finder with only Desktop AXScrollArea throws .noFocusedWindow
+            backend.windowList = [desktopScrollArea]
+            var noWindowError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                noWindowError = error
+            }
+            check(
+                noWindowError == .noFocusedWindow("Safari"),
+                "Rejects Desktop AXScrollArea when no real AXWindow exists"
+            )
+        }
+
+        // 5. Button fallback, .cannotComplete non-double-toggle, and delayed _fullScreenContentController re-entry retry
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, lg2])
+            let customApp = WindowTargetApp(processIdentifier: 401, bundleIdentifier: "example.custom", localizedName: "CustomApp")
+            backend.frontmostApp = customApp
+            let win = backend.makeWindow(
+                id: 30,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 300, y: 150, width: 1_100, height: 760),
+                fullScreen: true,
+                isFullScreenSettable: false,
+                hasFullScreenButton: true,
+                exitTransitionTicks: 1,
+                enterTransitionTicks: 1
+            )
+            backend.focusedElement = win
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let buttonFallbackMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                buttonFallbackMove.mode == .nativeFullScreen &&
+                backend.buttonPressSubroleChecks == [false, true] &&
+                backend.windowsByID[30]?.fullScreen == true,
+                "Falls back to AXFullScreenButton press (requireFullScreenSubrole=false on exit, true on entry) when AXFullScreen is not settable"
+            )
+
+            // .cannotComplete on exit + first setFullScreen(true) dropped silently by AppKit teardown lag
+            backend.buttonPressSubroleChecks.removeAll()
+            backend.windowsByID[30]?.isFullScreenSettable = true
+            backend.returnCannotCompleteOnExit = true
+            backend.dropNextFullScreenEntryCount = 1
+
+            let retryMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                retryMove.targetScreenName == "LG UltraFine (1)" &&
+                backend.buttonPressSubroleChecks.isEmpty &&
+                backend.setFullScreenCalls.filter({ $0 == true }).count == 2 &&
+                backend.windowsByID[30]?.fullScreen == true,
+                "Treats .cannotComplete exit as initiated without button double-toggle and retries dropped setFullScreen(true) after backoff"
+            )
+        }
+
+        // 6. Modal sheet blocker, unsupported kiosk fullscreen, and timeout cleanup invariants
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, lg2])
+            let app = WindowTargetApp(processIdentifier: 501, bundleIdentifier: "com.apple.TextEdit", localizedName: "TextEdit")
+            backend.frontmostApp = app
+            backend.enhancedUIEnabledByPID[app.processIdentifier] = true
+            let win = backend.makeWindow(
+                id: 40,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 200, y: 150, width: 900, height: 700),
+                fullScreen: true
+            )
+            backend.windowsByID[40]?.hasModalSheet = true
+            backend.focusedElement = win
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            var sheetError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                sheetError = error
+            }
+            check(
+                sheetError == .fullScreenExitBlockedByModalSheet("TextEdit") &&
+                backend.setFullScreenCalls.isEmpty,
+                "Attached modal sheet fails fast before toggling AXFullScreen"
+            )
+
+            // Kiosk window that neither allows setting AXFullScreen nor has a fullscreen button
+            backend.windowsByID[40]?.hasModalSheet = false
+            backend.windowsByID[40]?.isFullScreenSettable = false
+            backend.windowsByID[40]?.hasFullScreenButton = false
+            var kioskError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                kioskError = error
+            }
+            check(
+                kioskError == .fullScreenExitUnsupported("TextEdit"),
+                "Kiosk fullscreen window without AX exit capability throws .fullScreenExitUnsupported"
+            )
+
+            // Stalled re-entry timeout still restores AXEnhancedUserInterface and clears isMoveInProgress
+            backend.windowsByID[40]?.isFullScreenSettable = true
+            backend.windowsByID[40]?.hasFullScreenButton = true
+            backend.dropNextFullScreenEntryCount = 99
+            backend.ignoreButtonPressOnEntry = true
+            var timeoutError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                timeoutError = error
+            }
+            check(
+                timeoutError == .fullScreenReentryTimedOut("TextEdit") &&
+                backend.enhancedUIEnabledByPID[app.processIdentifier] == true &&
+                !service.isMoveInProgress,
+                "Re-entry timeout restores AXEnhancedUserInterface and resets isMoveInProgress"
+            )
+        }
+
+        // 7. Re-entrancy serialization under rapid shortcut presses
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, lg2])
+            let app = WindowTargetApp(processIdentifier: 601, bundleIdentifier: "com.apple.optimus", localizedName: "Optimus")
+            backend.frontmostApp = app
+            let win = backend.makeWindow(
+                id: 50,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 200, y: 120, width: 1_200, height: 800),
+                fullScreen: true,
+                exitTransitionTicks: 1,
+                enterTransitionTicks: 1
+            )
+            backend.focusedElement = win
+            backend.pauseOnFirstSleep = true
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let firstTask = Task { @MainActor in
+                try await service.moveFocusedWindowToNextScreen()
+            }
+
+            while !backend.isPausedOnSleep {
+                await Task.yield()
+            }
+            check(service.isMoveInProgress, "First move marks isMoveInProgress while awaiting fullscreen exit")
+
+            var concurrentError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                concurrentError = error
+            }
+            check(
+                concurrentError == .moveAlreadyInProgress &&
+                backend.setFullScreenCalls == [false],
+                "Concurrent shortcut press rejects with .moveAlreadyInProgress without issuing duplicate AXFullScreen calls"
+            )
+
+            backend.resumePausedSleep()
+            let firstResult = try await firstTask.value
+            check(
+                firstResult.targetScreenName == "LG UltraFine (2)" && !service.isMoveInProgress,
+                "First in-flight move finishes cleanly after concurrent rejection"
+            )
+
+            let subsequentResult = try await service.moveFocusedWindowToNextScreen()
+            check(
+                subsequentResult.targetScreenName == "LG UltraFine (1)",
+                "Subsequent move succeeds once previous fullscreen transition finishes"
+            )
+        }
+
+        // 8. Adversarial edge cases: sibling window isolation, transient IPC errors, EnhancedUI .cannotComplete restore, non-resizable oversized centering, Step A rollback, notched bottom-Dock fallback, and non-movable child AXWindow unwrapping
+        do {
+            let backend = MockWindowMoverBackend(screens: [lg1, builtIn, lg2])
+            let app = WindowTargetApp(processIdentifier: 701, bundleIdentifier: "com.google.Chrome", localizedName: "Google Chrome")
+            backend.frontmostApp = app
+            backend.enhancedUIEnabledByPID[app.processIdentifier] = true
+            backend.returnCannotCompleteOnDisableEnhancedUI = true
+            backend.transientIPCErrorPollsOnReentry = 2
+
+            let targetWin = backend.makeWindow(
+                id: 60,
+                frame: lg1.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: 150, y: 120, width: 1_400, height: 900),
+                fullScreen: true,
+                exitTransitionTicks: 1,
+                enterTransitionTicks: 2
+            )
+            let siblingFullScreenWin = backend.makeWindow(
+                id: 61,
+                frame: lg2.accessibilityFrame,
+                restoredDesktopFrame: CGRect(x: -1_900, y: 200, width: 1_200, height: 800),
+                fullScreen: true
+            )
+            backend.focusedElement = targetWin
+            backend.replaceInvalidatedWindowDuringExit = (oldID: 60, newID: 62)
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let result = try await service.moveFocusedWindowToNextScreen()
+            check(
+                result.targetScreenName == "LG UltraFine (2)" &&
+                backend.windowsByID[61]?.fullScreen == true &&
+                backend.windowsByID[62]?.fullScreen == true &&
+                backend.enhancedUIEnabledByPID[app.processIdentifier] == true,
+                "Re-acquires replacement window without touching pre-existing sibling fullscreen window, survives transient .cannotComplete IPC polls on re-entry, and restores EnhancedUI after .cannotComplete disable"
+            )
+            _ = siblingFullScreenWin
+        }
+
+        do {
+            // Non-movable child AXWindow (subrole AXUnknown) unwraps to fullscreen mainWindow; notched Built-in with bottom Dock (.attributeUnsupported); Step A rollback on setPosition failure; oversized non-resizable centering
+            let notchedBottomDock = ScreenGeometry(
+                name: "Built-in Bottom Dock",
+                accessibilityFrame: CGRect(x: -401, y: 1_440, width: 1_512, height: 982),
+                accessibilityVisibleFrame: CGRect(x: -401, y: 1_472, width: 1_512, height: 880)
+            )
+            let backend = MockWindowMoverBackend(screens: [lg1, notchedBottomDock])
+            let app = WindowTargetApp(processIdentifier: 801, bundleIdentifier: "example.notched", localizedName: "NotchedApp")
+            backend.frontmostApp = app
+
+            let fsMain = backend.makeWindow(
+                id: 70,
+                frame: CGRect(x: -401, y: 1_472, width: 1_512, height: 950),
+                restoredDesktopFrame: CGRect(x: -300, y: 1_500, width: 1_200, height: 800),
+                fullScreen: true,
+                exitTransitionTicks: 1,
+                enterTransitionTicks: 1
+            )
+            backend.returnAttributeUnsupportedForFullScreen = true
+            let childToolbarWin = backend.makeWindow(
+                id: 71,
+                subrole: "AXUnknown",
+                frame: CGRect(x: -401, y: 1_440, width: 1_512, height: 32),
+                fullScreen: false
+            )
+            backend.windowsByID[71]?.isPositionSettable = false
+            backend.focusedElement = childToolbarWin
+            backend.mainElement = fsMain
+
+            let service = WindowMoverService(backend: backend, timing: fastTiming)
+            let notchedMove = try await service.moveFocusedWindowToNextScreen()
+            check(
+                notchedMove.mode == .nativeFullScreen &&
+                notchedMove.targetScreenName == "LG UltraFine (1)",
+                "Unwraps non-movable AXUnknown child window to mainWindow and classifies notched+bottom-Dock fullscreen via spansFullScreenBand"
+            )
+
+            // Step A size rollback when setPosition fails
+            backend.returnAttributeUnsupportedForFullScreen = false
+            let desktopOversized = backend.makeWindow(
+                id: 72,
+                frame: CGRect(x: 100, y: 100, width: 2_200, height: 1_300),
+                fullScreen: false
+            )
+            backend.focusedElement = desktopOversized
+            backend.mainElement = desktopOversized
+            backend.failNextSetPositionError = .cannotComplete
+            var failedMoveError: WindowMoverError?
+            do {
+                _ = try await service.moveFocusedWindowToNextScreen()
+            } catch let error as WindowMoverError {
+                failedMoveError = error
+            }
+            check(
+                failedMoveError == .moveFailed(.cannotComplete) &&
+                backend.windowsByID[72]?.frame.size == CGSize(width: 2_200, height: 1_300),
+                "Rolls back pre-move setSize when setPosition fails"
+            )
+
+            // Non-resizable 2400x2000 window moving onto smaller Built-in (1512x880 visible, stacked below LG 1) centers X and Y so Built-in wins intersection
+            backend.windowsByID[72]?.frame = CGRect(x: 80, y: 30, width: 2_400, height: 2_000)
+            backend.windowsByID[72]?.isSizeSettable = false
+            let nonResizableMove = try await service.moveFocusedWindowToNextScreen()
+            let orderedPair = WindowMoverService.orderedScreens(from: [lg1, notchedBottomDock])
+            let finalNonResizableFrame = backend.windowsByID[72]!.frame
+            check(
+                nonResizableMove.targetScreenName == "Built-in Bottom Dock" &&
+                WindowMoverService.screenIndex(containing: finalNonResizableFrame, in: orderedPair) == 0,
+                "Centers oversized non-resizable window on both axes so smaller target display retains maximum intersection area"
+            )
+        }
     }
 }
 
@@ -1178,6 +1766,482 @@ private final class MockInputSourceBackend: InputSourceBackend {
 
     func isSpotlightActive(wasSpotlightActive: Bool) -> Bool {
         spotlightActivityState(wasSpotlightActive: wasSpotlightActive) != .inactive
+    }
+}
+
+@MainActor
+private final class MockWindowMoverBackend: WindowMoverBackend {
+    struct MockWindowState {
+        var id: Int
+        var role: String
+        var subrole: String?
+        var containingWindow: WindowElementHandle?
+        var frame: CGRect
+        var restoredDesktopFrame: CGRect
+        var fullScreen: Bool
+        var isPositionSettable: Bool
+        var isSizeSettable: Bool
+        var isFullScreenSettable: Bool
+        var hasFullScreenButton: Bool
+        var hasStandardButtons: Bool
+        var minimized: Bool
+        var isMain: Bool
+        var hasModalSheet: Bool
+        var exitTransitionTicks: Int
+        var enterTransitionTicks: Int
+    }
+
+    private enum PendingTransition {
+        case exiting(windowID: Int, remainingTicks: Int)
+        case entering(windowID: Int, remainingTicks: Int)
+    }
+
+    var accessibilityTrusted = true
+    var frontmostApp: WindowTargetApp? {
+        didSet {
+            if let frontmostApp {
+                appsByPID[frontmostApp.processIdentifier] = frontmostApp
+            }
+        }
+    }
+    var appsByPID: [pid_t: WindowTargetApp] = [:]
+    var screenList: [ScreenGeometry]
+    var focusedElement: WindowElementHandle?
+    var mainElement: WindowElementHandle?
+    var windowList: [WindowElementHandle] = []
+    var windowsByID: [Int: MockWindowState] = [:]
+    var enhancedUIEnabledByPID: [pid_t: Bool] = [:]
+
+    var setSizeCalls: [CGSize] = []
+    var setPositionCalls: [CGPoint] = []
+    var setFullScreenCalls: [Bool] = []
+    var enhancedUICalls: [Bool] = []
+    var activatedPIDs: [pid_t] = []
+    var buttonPressSubroleChecks: [Bool] = []
+
+    var postMoveSizeDrift: CGSize?
+    var transientFrontmostSwitchDuringExit: WindowTargetApp?
+    var returnCannotCompleteOnExit = false
+    var returnCannotCompleteOnDisableEnhancedUI = false
+    var returnAttributeUnsupportedForFullScreen = false
+    var transientIPCErrorPollsOnReentry = 0
+    var replaceInvalidatedWindowDuringExit: (oldID: Int, newID: Int)?
+    var failNextSetPositionError: AXError?
+    var dropNextFullScreenEntryCount = 0
+    var ignoreButtonPressOnEntry = false
+    var pauseOnFirstSleep = false
+    private(set) var isPausedOnSleep = false
+
+    private var pendingTransition: PendingTransition?
+    private var sleepContinuation: CheckedContinuation<Void, Never>?
+
+    init(screens: [ScreenGeometry]) {
+        self.screenList = screens
+    }
+
+    func makeWindow(
+        id: Int,
+        subrole: String? = kAXStandardWindowSubrole as String,
+        frame: CGRect,
+        restoredDesktopFrame: CGRect? = nil,
+        fullScreen: Bool,
+        isSizeSettable: Bool = true,
+        isFullScreenSettable: Bool = true,
+        hasFullScreenButton: Bool = true,
+        hasStandardButtons: Bool = true,
+        minimized: Bool = false,
+        isMain: Bool = true,
+        exitTransitionTicks: Int = 2,
+        enterTransitionTicks: Int = 2
+    ) -> WindowElementHandle {
+        let handle = WindowElementHandle(storage: .mock(id: id))
+        windowsByID[id] = MockWindowState(
+            id: id,
+            role: kAXWindowRole as String,
+            subrole: subrole,
+            containingWindow: nil,
+            frame: frame,
+            restoredDesktopFrame: restoredDesktopFrame ?? frame,
+            fullScreen: fullScreen,
+            isPositionSettable: !fullScreen,
+            isSizeSettable: isSizeSettable,
+            isFullScreenSettable: isFullScreenSettable,
+            hasFullScreenButton: hasFullScreenButton,
+            hasStandardButtons: hasStandardButtons,
+            minimized: minimized,
+            isMain: isMain,
+            hasModalSheet: false,
+            exitTransitionTicks: exitTransitionTicks,
+            enterTransitionTicks: enterTransitionTicks
+        )
+        windowList.append(handle)
+        return handle
+    }
+
+    func makeElement(
+        id: Int,
+        role: String,
+        subrole: String?,
+        containingWindow: WindowElementHandle?
+    ) -> WindowElementHandle {
+        let handle = WindowElementHandle(storage: .mock(id: id))
+        windowsByID[id] = MockWindowState(
+            id: id,
+            role: role,
+            subrole: subrole,
+            containingWindow: containingWindow,
+            frame: .zero,
+            restoredDesktopFrame: .zero,
+            fullScreen: false,
+            isPositionSettable: false,
+            isSizeSettable: false,
+            isFullScreenSettable: false,
+            hasFullScreenButton: false,
+            hasStandardButtons: false,
+            minimized: false,
+            isMain: false,
+            hasModalSheet: false,
+            exitTransitionTicks: 0,
+            enterTransitionTicks: 0
+        )
+        return handle
+    }
+
+    func resumePausedSleep() {
+        isPausedOnSleep = false
+        let continuation = sleepContinuation
+        sleepContinuation = nil
+        continuation?.resume()
+    }
+
+    func isAccessibilityTrusted() -> Bool {
+        accessibilityTrusted
+    }
+
+    func frontmostApplication() -> WindowTargetApp? {
+        frontmostApp
+    }
+
+    @discardableResult
+    func activateApplication(processIdentifier: pid_t) -> Bool {
+        activatedPIDs.append(processIdentifier)
+        if let current = frontmostApp, current.processIdentifier != processIdentifier {
+            frontmostApp = appsByPID[processIdentifier] ?? WindowTargetApp(
+                processIdentifier: processIdentifier,
+                bundleIdentifier: nil,
+                localizedName: "RestoredApp"
+            )
+        }
+        return true
+    }
+
+    func screens() -> [ScreenGeometry] {
+        screenList
+    }
+
+    func focusedWindowOrElement(of processIdentifier: pid_t) -> WindowElementHandle? {
+        focusedElement
+    }
+
+    func mainWindow(of processIdentifier: pid_t) -> WindowElementHandle? {
+        mainElement
+    }
+
+    func windows(of processIdentifier: pid_t) -> [WindowElementHandle] {
+        windowList
+    }
+
+    func role(of element: WindowElementHandle) -> String? {
+        guard case .mock(let id) = element.storage else { return nil }
+        return windowsByID[id]?.role
+    }
+
+    func subrole(of element: WindowElementHandle) -> String? {
+        guard case .mock(let id) = element.storage else { return nil }
+        return windowsByID[id]?.subrole
+    }
+
+    func containingWindow(of element: WindowElementHandle) -> WindowElementHandle? {
+        guard case .mock(let id) = element.storage else { return nil }
+        return windowsByID[id]?.containingWindow
+    }
+
+    func isMinimized(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.minimized ?? false
+    }
+
+    func isMain(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.isMain ?? false
+    }
+
+    func hasAttachedModalSheet(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.hasModalSheet ?? false
+    }
+
+    func hasStandardWindowButtons(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.hasStandardButtons ?? false
+    }
+
+    func frame(of window: WindowElementHandle) -> AccessibilityValueResult<CGRect> {
+        if case .entering = pendingTransition, transientIPCErrorPollsOnReentry > 0 {
+            return .failure(.cannotComplete)
+        }
+        guard case .mock(let id) = window.storage, let state = windowsByID[id] else {
+            return .failure(.invalidUIElement)
+        }
+        return .success(state.frame)
+    }
+
+    func positionSettability(
+        _ window: WindowElementHandle
+    ) -> AccessibilityValueResult<Bool> {
+        if case .entering = pendingTransition, transientIPCErrorPollsOnReentry > 0 {
+            return .failure(.cannotComplete)
+        }
+        guard case .mock(let id) = window.storage, let state = windowsByID[id] else {
+            return .failure(.invalidUIElement)
+        }
+        return .success(state.isPositionSettable)
+    }
+
+    func isSizeSettable(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.isSizeSettable ?? false
+    }
+
+    func setPosition(_ origin: CGPoint, of window: WindowElementHandle) -> AXError {
+        if let error = failNextSetPositionError {
+            failNextSetPositionError = nil
+            return error
+        }
+        guard case .mock(let id) = window.storage, var state = windowsByID[id] else {
+            return .invalidUIElement
+        }
+        guard state.isPositionSettable else {
+            return .failure
+        }
+        setPositionCalls.append(origin)
+        state.frame.origin = origin
+        if let drift = postMoveSizeDrift {
+            postMoveSizeDrift = nil
+            state.frame.size = drift
+        }
+        state.restoredDesktopFrame = state.frame
+        windowsByID[id] = state
+        return .success
+    }
+
+    func setSize(_ size: CGSize, of window: WindowElementHandle) -> AXError {
+        guard case .mock(let id) = window.storage, var state = windowsByID[id] else {
+            return .invalidUIElement
+        }
+        guard state.isSizeSettable else {
+            return .failure
+        }
+        setSizeCalls.append(size)
+        state.frame.size = size
+        state.restoredDesktopFrame = state.frame
+        windowsByID[id] = state
+        return .success
+    }
+
+    @discardableResult
+    func raiseWindow(_ window: WindowElementHandle) -> AXError {
+        .success
+    }
+
+    func fullScreenState(of window: WindowElementHandle) -> AccessibilityValueResult<Bool> {
+        if case .entering = pendingTransition, transientIPCErrorPollsOnReentry > 0 {
+            transientIPCErrorPollsOnReentry -= 1
+            return .failure(.cannotComplete)
+        }
+        guard case .mock(let id) = window.storage, let state = windowsByID[id] else {
+            return .failure(.invalidUIElement)
+        }
+        if returnAttributeUnsupportedForFullScreen {
+            return .failure(.attributeUnsupported)
+        }
+        return .success(state.fullScreen)
+    }
+
+    func isFullScreenSettable(_ window: WindowElementHandle) -> Bool {
+        if returnAttributeUnsupportedForFullScreen {
+            return false
+        }
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.isFullScreenSettable ?? false
+    }
+
+    func setFullScreen(_ fullScreen: Bool, of window: WindowElementHandle) -> AXError {
+        guard case .mock(let id) = window.storage, let state = windowsByID[id] else {
+            return .invalidUIElement
+        }
+        guard state.isFullScreenSettable, !returnAttributeUnsupportedForFullScreen else {
+            return .attributeUnsupported
+        }
+        setFullScreenCalls.append(fullScreen)
+        if fullScreen == state.fullScreen {
+            return .success
+        }
+        if !fullScreen {
+            scheduleExitTransition(for: id, ticks: state.exitTransitionTicks)
+            if returnCannotCompleteOnExit {
+                returnCannotCompleteOnExit = false
+                return .cannotComplete
+            }
+            return .success
+        } else {
+            if dropNextFullScreenEntryCount > 0 {
+                dropNextFullScreenEntryCount -= 1
+                return .success
+            }
+            scheduleEnterTransition(for: id, ticks: state.enterTransitionTicks)
+            return .success
+        }
+    }
+
+    func pressFullScreenButton(of window: WindowElementHandle, requireFullScreenSubrole: Bool) -> AXError {
+        guard case .mock(let id) = window.storage, let state = windowsByID[id] else {
+            return .invalidUIElement
+        }
+        guard state.hasFullScreenButton else {
+            return .noValue
+        }
+        buttonPressSubroleChecks.append(requireFullScreenSubrole)
+        if state.fullScreen {
+            scheduleExitTransition(for: id, ticks: state.exitTransitionTicks)
+        } else if !ignoreButtonPressOnEntry {
+            scheduleEnterTransition(for: id, ticks: state.enterTransitionTicks)
+        }
+        return .success
+    }
+
+    func hasFullScreenCapableButton(_ window: WindowElementHandle) -> Bool {
+        guard case .mock(let id) = window.storage else { return false }
+        return windowsByID[id]?.hasFullScreenButton ?? false
+    }
+
+    func isEnhancedUserInterfaceEnabled(for processIdentifier: pid_t) -> Bool {
+        enhancedUIEnabledByPID[processIdentifier] ?? false
+    }
+
+    @discardableResult
+    func setEnhancedUserInterface(_ enabled: Bool, for processIdentifier: pid_t) -> AXError {
+        enhancedUICalls.append(enabled)
+        enhancedUIEnabledByPID[processIdentifier] = enabled
+        if !enabled, returnCannotCompleteOnDisableEnhancedUI {
+            returnCannotCompleteOnDisableEnhancedUI = false
+            return .cannotComplete
+        }
+        return .success
+    }
+
+    func sleep(_ duration: Duration) async throws {
+        if pauseOnFirstSleep {
+            pauseOnFirstSleep = false
+            isPausedOnSleep = true
+            await withCheckedContinuation { continuation in
+                self.sleepContinuation = continuation
+            }
+        }
+        advanceTransitionTick()
+    }
+
+    private func scheduleExitTransition(for windowID: Int, ticks: Int) {
+        if let switched = transientFrontmostSwitchDuringExit {
+            transientFrontmostSwitchDuringExit = nil
+            frontmostApp = switched
+        }
+        var targetWindowID = windowID
+        if let replacement = replaceInvalidatedWindowDuringExit, replacement.oldID == windowID,
+           var migrated = windowsByID.removeValue(forKey: replacement.oldID) {
+            replaceInvalidatedWindowDuringExit = nil
+            migrated.id = replacement.newID
+            windowsByID[replacement.newID] = migrated
+            let newHandle = WindowElementHandle(storage: .mock(id: replacement.newID))
+            windowList.removeAll { $0 == WindowElementHandle(storage: .mock(id: replacement.oldID)) }
+            windowList.append(newHandle)
+            focusedElement = nil
+            mainElement = nil
+            targetWindowID = replacement.newID
+        }
+        pendingTransition = .exiting(windowID: targetWindowID, remainingTicks: max(1, ticks))
+    }
+
+    private func scheduleEnterTransition(for windowID: Int, ticks: Int) {
+        pendingTransition = .entering(windowID: windowID, remainingTicks: max(1, ticks))
+    }
+
+    private func advanceTransitionTick() {
+        guard let transition = pendingTransition else { return }
+        switch transition {
+        case .exiting(let windowID, let remainingTicks):
+            guard var state = windowsByID[windowID] else {
+                pendingTransition = nil
+                return
+            }
+            if remainingTicks > 1 {
+                state.fullScreen = false
+                state.isPositionSettable = true
+                state.frame = CGRect(
+                    x: state.restoredDesktopFrame.minX + CGFloat(remainingTicks * 12),
+                    y: state.restoredDesktopFrame.minY + CGFloat(remainingTicks * 8),
+                    width: state.restoredDesktopFrame.width + CGFloat(remainingTicks * 20),
+                    height: state.restoredDesktopFrame.height + CGFloat(remainingTicks * 14)
+                )
+                windowsByID[windowID] = state
+                pendingTransition = .exiting(windowID: windowID, remainingTicks: remainingTicks - 1)
+            } else {
+                state.fullScreen = false
+                state.isPositionSettable = true
+                state.frame = state.restoredDesktopFrame
+                windowsByID[windowID] = state
+                pendingTransition = nil
+            }
+
+        case .entering(let windowID, let remainingTicks):
+            if transientIPCErrorPollsOnReentry > 0 {
+                return
+            }
+            guard var state = windowsByID[windowID] else {
+                pendingTransition = nil
+                return
+            }
+            let ordered = WindowMoverService.orderedScreens(from: screenList)
+            let ownerIndex = WindowMoverService.screenIndex(containing: state.frame, in: ordered)
+            let ownerScreen = ordered[ownerIndex]
+            let targetFullScreenFrame = ownerScreen.name.hasPrefix("Built-in")
+                ? CGRect(
+                    x: ownerScreen.accessibilityFrame.minX,
+                    y: ownerScreen.accessibilityVisibleFrame.minY,
+                    width: ownerScreen.accessibilityFrame.width,
+                    height: ownerScreen.accessibilityFrame.maxY - ownerScreen.accessibilityVisibleFrame.minY
+                )
+                : ownerScreen.accessibilityFrame
+
+            if remainingTicks > 1 {
+                state.fullScreen = true
+                state.isPositionSettable = false
+                state.frame = CGRect(
+                    x: targetFullScreenFrame.minX + 10,
+                    y: targetFullScreenFrame.minY + 10,
+                    width: targetFullScreenFrame.width - 20,
+                    height: targetFullScreenFrame.height - 20
+                )
+                windowsByID[windowID] = state
+                pendingTransition = .entering(windowID: windowID, remainingTicks: remainingTicks - 1)
+            } else {
+                state.fullScreen = true
+                state.isPositionSettable = false
+                state.frame = targetFullScreenFrame
+                windowsByID[windowID] = state
+                pendingTransition = nil
+            }
+        }
     }
 }
 

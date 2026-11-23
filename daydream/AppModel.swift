@@ -103,6 +103,7 @@ final class AppModel {
     @ObservationIgnored private var clipboardHistoryTargetApplication: ExternalApplicationTarget?
     @ObservationIgnored private var isApplyingICloudUpdate = false
     @ObservationIgnored private var activeCommandTask: Task<Void, Never>?
+    @ObservationIgnored private var activeWindowMoveTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -120,7 +121,7 @@ final class AppModel {
         openAIClient = AIClient(logger: logger)
         selectionService = SelectionService(logger: logger)
         replaceService = ReplaceService(logger: logger)
-        windowMoverService = WindowMoverService()
+        windowMoverService = WindowMoverService(logger: logger)
         let iCloudPasswordsAutomationService = ICloudPasswordsAutomationService(logger: logger)
         self.iCloudPasswordsAutomationService = iCloudPasswordsAutomationService
         let inputSourceSwitchingService = InputSourceSwitchingService(logger: logger)
@@ -456,30 +457,40 @@ final class AppModel {
     }
 
     func moveFocusedWindowToNextMonitor() {
-        do {
-            let result = try windowMoverService.moveFocusedWindowToNextScreen()
-            Task {
-                await logger.log(
+        guard activeWindowMoveTask == nil, !windowMoverService.isMoveInProgress else { return }
+
+        activeWindowMoveTask = Task { @MainActor [weak self] in
+            defer { self?.activeWindowMoveTask = nil }
+            guard let self, !self.windowMoverService.isMoveInProgress else { return }
+            self.iCloudPasswordsAutomationService.setWindowMoveSuppression(true)
+            defer {
+                self.iCloudPasswordsAutomationService.setWindowMoveSuppression(false)
+            }
+
+            do {
+                let result = try await self.windowMoverService.moveFocusedWindowToNextScreen()
+                await self.logger.log(
                     "window",
                     "Moved focused window to next monitor",
                     metadata: [
                         "app": result.applicationName,
+                        "mode": result.mode.rawValue,
                         "source_monitor": result.sourceScreenName,
                         "target_monitor": result.targetScreenName,
                     ]
                 )
-            }
-        } catch {
-            Task {
-                await logger.log(
+            } catch WindowMoverError.moveAlreadyInProgress {
+                return
+            } catch {
+                await self.logger.log(
                     "window",
                     "Failed to move focused window",
                     metadata: ["error": error.localizedDescription]
                 )
-            }
 
-            if case WindowMoverError.accessibilityPermissionMissing = error {
-                promptForAccessibilityPermission()
+                if case WindowMoverError.accessibilityPermissionMissing = error {
+                    self.promptForAccessibilityPermission()
+                }
             }
         }
     }

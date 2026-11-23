@@ -75,7 +75,13 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
     private var verificationTargetProcessIdentifier: pid_t?
     private var lastActiveBrowserProcessIdentifier: pid_t?
     private var isStarted = false
+    private var windowMoveSuppressionDepth = 0
+    private var windowMoveSuppressionUntil = Date.distantPast
     private var currentStatus = ICloudPasswordsAutomationStatus.disabled
+
+    private var isSuppressedForWindowMove: Bool {
+        windowMoveSuppressionDepth > 0 || Date.now < windowMoveSuppressionUntil
+    }
 
     init(logger: AppLogger) {
         self.logger = logger
@@ -105,11 +111,27 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
         queue.async { [weak self] in
             guard let self else { return }
             isStarted = false
+            windowMoveSuppressionDepth = 0
+            windowMoveSuppressionUntil = .distantPast
             cancelBurstScan()
             lastActiveBrowserProcessIdentifier = nil
             removeAllBrowserAccessibilityObservers()
             removeWorkspaceObservers()
             updateStatus(.disabled)
+        }
+    }
+
+    func setWindowMoveSuppression(_ isSuppressed: Bool) {
+        queue.async { [weak self] in
+            guard let self else { return }
+            if isSuppressed {
+                windowMoveSuppressionDepth += 1
+            } else {
+                windowMoveSuppressionDepth = max(0, windowMoveSuppressionDepth - 1)
+                if windowMoveSuppressionDepth == 0 {
+                    windowMoveSuppressionUntil = Date.now.addingTimeInterval(0.5)
+                }
+            }
         }
     }
 
@@ -184,7 +206,7 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
     }
 
     private func handlePasswordsHelperActivation() {
-        guard isStarted else { return }
+        guard isStarted, !isSuppressedForWindowMove else { return }
         guard AXIsProcessTrusted() else {
             updateStatus(.accessibilityRequired)
             return
@@ -313,6 +335,7 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
 
     private func handleBrowserWindowCreated(processIdentifier: pid_t, windowSize: CGSize?) {
         guard isStarted,
+              !isSuppressedForWindowMove,
               let browser = Self.supportedBrowser(processIdentifier: processIdentifier) else {
             return
         }
@@ -360,6 +383,7 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
             updateStatus(.watching)
             return
         }
+        guard !isSuppressedForWindowMove else { return }
         guard AXIsProcessTrusted() else {
             cancelBurstScan()
             updateStatus(.accessibilityRequired)

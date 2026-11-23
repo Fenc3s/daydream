@@ -98,6 +98,7 @@ enum ICloudPasswordsAutomationStatus {
         "daydream/Services/ReasoningCapabilityDiscovery.swift",
         "daydream/Services/ICloudSyncService.swift",
         "daydream/Services/InputSourceSwitchingService.swift",
+        "daydream/Services/WindowMoverService.swift",
         "daydream/Services/SettingsStore.swift",
         "tests/ProviderModelTests.swift",
     ]
