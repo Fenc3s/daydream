@@ -10,6 +10,9 @@ struct MenuBarView: View {
     var body: some View {
         Text("daydream \(appModel.applicationVersionDisplay)")
             .foregroundStyle(.secondary)
+            .onAppear {
+                appModel.refreshAccessibilityTrustState()
+            }
 
         Divider()
 

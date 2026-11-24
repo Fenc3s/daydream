@@ -15,21 +15,23 @@ struct SettingsRootView: View {
                 )
                 .tag(section)
             }
-            .navigationSplitViewColumnWidth(min: 205, ideal: 220, max: 245)
             .listStyle(.sidebar)
             .toolbar(removing: .sidebarToggle)
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: 0) {
                     Divider()
                         .opacity(0.45)
-                    HStack(spacing: 6) {
+                    HStack(spacing: 8) {
                         Text("Daydream")
                             .font(.caption.weight(.medium))
                             .foregroundStyle(.secondary)
-                        Spacer()
+                            .lineLimit(1)
+                        Spacer(minLength: 4)
                         Text(appModel.applicationVersionDisplay)
                             .font(.caption2.monospacedDigit())
                             .foregroundStyle(.secondary)
+                            .lineLimit(1)
+                            .fixedSize(horizontal: true, vertical: false)
                             .padding(.horizontal, 7)
                             .padding(.vertical, 2)
                             .background(
@@ -41,6 +43,8 @@ struct SettingsRootView: View {
                     .padding(.vertical, 10)
                 }
             }
+            .frame(minWidth: 225, idealWidth: 240, maxWidth: 270)
+            .navigationSplitViewColumnWidth(min: 225, ideal: 240, max: 270)
         } detail: {
             Group {
                 switch appModel.selectedSettingsSection {
@@ -67,6 +71,7 @@ struct SettingsRootView: View {
             }
         )
         .onAppear {
+            appModel.refreshAccessibilityTrustState()
             appModel.updateWindowLifecycle(named: "Settings", isVisible: true)
         }
         .onDisappear {
@@ -245,6 +250,60 @@ private final class SettingsWindowConfigurationView: NSView {
         window.toolbarStyle = .unified
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        enforceSidebarColumnWidth(in: window)
+        DispatchQueue.main.async { [weak window] in
+            guard let window else { return }
+            Self.applySidebarColumnBounds(in: window)
+        }
+    }
+
+    private func enforceSidebarColumnWidth(in window: NSWindow) {
+        Self.applySidebarColumnBounds(in: window)
+    }
+
+    private static func applySidebarColumnBounds(in window: NSWindow) {
+        let minSidebarWidth: CGFloat = 225
+        let idealSidebarWidth: CGFloat = 240
+        let maxSidebarWidth: CGFloat = 270
+
+        if let rootController = window.contentViewController,
+           let splitController = findSplitViewController(in: rootController),
+           let sidebarItem = splitController.splitViewItems.first {
+            sidebarItem.minimumThickness = minSidebarWidth
+            sidebarItem.maximumThickness = maxSidebarWidth
+            sidebarItem.canCollapse = false
+        }
+
+        if let contentView = window.contentView,
+           let splitView = findSplitView(in: contentView),
+           let firstPane = splitView.subviews.first,
+           firstPane.frame.width < minSidebarWidth {
+            splitView.setPosition(idealSidebarWidth, ofDividerAt: 0)
+        }
+    }
+
+    private static func findSplitViewController(in controller: NSViewController) -> NSSplitViewController? {
+        if let split = controller as? NSSplitViewController {
+            return split
+        }
+        for child in controller.children {
+            if let found = findSplitViewController(in: child) {
+                return found
+            }
+        }
+        return nil
+    }
+
+    private static func findSplitView(in view: NSView) -> NSSplitView? {
+        if let split = view as? NSSplitView, split.isVertical {
+            return split
+        }
+        for subview in view.subviews {
+            if let found = findSplitView(in: subview) {
+                return found
+            }
+        }
+        return nil
     }
 }
 

@@ -107,6 +107,7 @@ final class AppModel {
     @ObservationIgnored private var activeCommandTask: Task<Void, Never>?
     @ObservationIgnored private var activeWindowMoveTask: Task<Void, Never>?
     @ObservationIgnored private var activeChatGPTSignInTask: Task<Void, Never>?
+    @ObservationIgnored private var accessibilityTrustWatchTask: Task<Void, Never>?
 
     // MARK: - Initialization
 
@@ -425,10 +426,38 @@ final class AppModel {
 
     // Prompts the user for Accessibility permissions.
     func promptForAccessibilityPermission() {
-        _ = selectionService.isAccessibilityTrusted(prompt: true)
+        let trusted = selectionService.isAccessibilityTrusted(prompt: true)
+        if diagnostics.accessibilityTrusted != trusted {
+            diagnostics.accessibilityTrusted = trusted
+        }
+        if trusted {
+            configureICloudPasswordsAutomation()
+            configureInputSourceSwitching()
+        } else {
+            openAccessibilitySettings()
+        }
         Task {
-            await logger.log("permissions", "Prompted for accessibility permission")
+            await logger.log(
+                "permissions",
+                "Prompted for accessibility permission",
+                metadata: ["trusted": "\(trusted)"]
+            )
             await refreshDiagnostics()
+        }
+    }
+
+    func refreshAccessibilityTrustState() {
+        let trusted = selectionService.isAccessibilityTrusted()
+        guard diagnostics.accessibilityTrusted != trusted else { return }
+        diagnostics.accessibilityTrusted = trusted
+        if trusted {
+            accessibilityTrustWatchTask?.cancel()
+            accessibilityTrustWatchTask = nil
+            configureICloudPasswordsAutomation()
+            configureInputSourceSwitching()
+            Task {
+                await logger.log("permissions", "Accessibility permission granted")
+            }
         }
     }
 
@@ -442,10 +471,27 @@ final class AppModel {
 
     // Opens the Accessibility settings in System Preferences.
     func openAccessibilitySettings() {
-        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") else {
-            return
+        if let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility") {
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            NSWorkspace.shared.open(url, configuration: configuration)
         }
-        NSWorkspace.shared.open(url)
+        startAccessibilityTrustWatch()
+    }
+
+    private func startAccessibilityTrustWatch() {
+        accessibilityTrustWatchTask?.cancel()
+        accessibilityTrustWatchTask = Task { @MainActor [weak self] in
+            defer { self?.accessibilityTrustWatchTask = nil }
+            for _ in 0..<90 {
+                try? await Task.sleep(for: .seconds(1))
+                guard let self, !Task.isCancelled else { return }
+                self.refreshAccessibilityTrustState()
+                if self.diagnostics.accessibilityTrusted {
+                    return
+                }
+            }
+        }
     }
 
     func moveFocusedWindowToNextMonitor() {
@@ -1511,8 +1557,9 @@ final class AppModel {
             }
 
             Task { @MainActor [weak self] in
-                guard let self,
-                      self.isEligibleClipboardHistoryTarget(app) else { return }
+                guard let self else { return }
+                self.refreshAccessibilityTrustState()
+                guard self.isEligibleClipboardHistoryTarget(app) else { return }
                 let target = self.targetApplication(from: app)
                 self.lastClipboardHistoryApplication = target
 
