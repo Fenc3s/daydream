@@ -108,14 +108,6 @@ struct MenuBarView: View {
         }
         .applyMenuShortcut(appModel.settings.clipboardHistoryShortcut)
 
-        Button("Save Clipboard Image to Photos") {
-            appModel.saveClipboardImageToPhotos()
-        }
-
-        Button("Install Save Image Extension…") {
-            appModel.openSaveImageExtensionInstaller()
-        }
-
         Menu("Input Sources: \(appModel.settings.inputSourceSwitchingEnabled ? "Auto" : "Off")") {
             Button {
                 appModel.setInputSourceSwitchingEnabled(!appModel.settings.inputSourceSwitchingEnabled)

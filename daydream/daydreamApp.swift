@@ -36,34 +36,9 @@ struct daydreamApp: App {
 // The AppDelegate for the application, handling app life cycle events.
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private let photoLibraryService = PhotoLibraryService.shared
-    private let diaImageExtensionService = DiaImageExtensionService.shared
-
     // Set the activation policy to .accessory so the app doesn't appear in the Dock.
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
-        let logger = AppLogger.shared
-        photoLibraryService.configure(logger: logger)
-
-        if diaImageExtensionService.isNativeMessagingLaunch {
-            Task {
-                await NativeMessagingHost.run(photoLibraryService: photoLibraryService, logger: logger)
-                NSApp.terminate(nil)
-            }
-            return
-        }
-
-        do {
-            try diaImageExtensionService.registerNativeMessagingHost()
-        } catch {
-            Task {
-                await logger.log(
-                    "photos",
-                    "Failed to register Dia native messaging host",
-                    metadata: ["error": error.localizedDescription]
-                )
-            }
-        }
     }
 
     // Prevent the app from terminating when the last window is closed.

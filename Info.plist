@@ -22,7 +22,5 @@
     <true/>
     <key>NSAppleEventsUsageDescription</key>
     <string>daydream uses System Events to paste AI output back into the currently selected text.</string>
-    <key>NSPhotoLibraryAddUsageDescription</key>
-    <string>daydream saves images that you explicitly choose to your Photos library.</string>
 </dict>
 </plist>

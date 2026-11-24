@@ -1,6 +1,6 @@
 # daydream
 
-A lightweight macOS menu bar app for running custom AI commands on selected text in any app—plus clipboard history, cross-monitor window movement, and automatic input source switching.
+A lightweight macOS menu bar app for running custom AI commands on selected text in any app—plus clipboard history, cross-monitor window movement, automatic input source switching, and iCloud Passwords verification auto-fill for Chrome.
 
 ## Download & Install
 
@@ -29,7 +29,7 @@ cd daydream
 
 1. **Grant Accessibility Permission**
    - Click the Daydream icon in the menu bar → **Grant Accessibility Permission** (or enable it in **System Settings → Privacy & Security → Accessibility**).
-   - Required for capturing/replacing selected text, moving windows across monitors, and Spotlight input source detection.
+   - Required for capturing/replacing selected text, moving windows across monitors, Spotlight input source detection, and Chrome iCloud Passwords verification auto-fill.
 
 2. **Connect an AI Provider**
    - Open **Settings → General** from the menu bar and choose a provider:
@@ -43,7 +43,7 @@ cd daydream
    - **Clipboard History:** Open from the menu bar (or your configured shortcut) to search and paste previous clipboard items.
    - **Move Window Across Displays:** Press `Option-Command-D` (configurable) to move the focused window to the next monitor.
    - **Auto Input Source Switching:** Set a default English layout and per-app input sources in **Settings → Input Sources**, or toggle quickly from the menu bar.
-   - **Save Web Images to Photos:** Click **Install Save Image Extension…** in the menu bar to load the extension in Dia or Chrome.
+   - **Chrome iCloud Passwords Auto-Fill:** Enabled by default (**Settings → General → iCloud Passwords for Browsers**). Click the iCloud Passwords extension in Chrome, Chrome Canary, or Dia—Daydream automatically fills the 6-digit macOS verification code and closes the prompts so password AutoFill is ready immediately.
 
 ## Features
 
@@ -51,7 +51,8 @@ cd daydream
 - **Multiple AI Providers** — Sign in with ChatGPT, OpenRouter, and DeepSeek with per-model reasoning controls.
 - **AI Memory** — automatically saves compact local context from past commands to improve future responses.
 - **Clipboard History** — fast SQLite FTS5 search with automatic cleanup.
-- **Window & Input Utilities** — cross-monitor window movement (including full-screen spaces), per-app & Spotlight input source switching, and browser iCloud Passwords verification helper.
+- **Chrome iCloud Passwords Auto-Fill** — automatically reads the 6-digit macOS verification code, fills it into the iCloud Passwords extension in Chrome, Chrome Canary, or Dia, and dismisses the verification popups so password AutoFill works hands-free.
+- **Window & Input Utilities** — cross-monitor window movement (including full-screen spaces) and per-app & Spotlight input source switching.
 
 ## Privacy & Local Storage
 

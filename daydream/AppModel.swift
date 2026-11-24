@@ -378,14 +378,6 @@ final class AppModel {
         configureInputSourceSwitching()
     }
 
-    func saveClipboardImageToPhotos() {
-        PhotoLibraryService.shared.saveImageFromClipboard()
-    }
-
-    func openSaveImageExtensionInstaller() {
-        DiaImageExtensionService.shared.openExtensionInstaller()
-    }
-
     // Adds a new command.
     func addCommand() {
         let nextIndex = settings.commands.count + 1

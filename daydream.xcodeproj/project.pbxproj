@@ -7,12 +7,10 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
-		A1B2C3D42FA103670046BEED /* DiaSaveImageExtension in Resources */ = {isa = PBXBuildFile; fileRef = A1B2C3D32FA103670046BEED /* DiaSaveImageExtension */; };
 		E5D63D402FA103670046BEED /* Highlightr in Frameworks */ = {isa = PBXBuildFile; productRef = E5D63D3F2FA103670046BEED /* Highlightr */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		A1B2C3D32FA103670046BEED /* DiaSaveImageExtension */ = {isa = PBXFileReference; lastKnownFileType = folder; path = DiaSaveImageExtension; sourceTree = "<group>"; };
 		E5DC69492F7F8B3F00A40D7A /* daydream.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = daydream.app; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
@@ -39,7 +37,6 @@
 		E5DC69402F7F8B3F00A40D7A = {
 			isa = PBXGroup;
 			children = (
-				A1B2C3D32FA103670046BEED /* DiaSaveImageExtension */,
 				E5DC694B2F7F8B3F00A40D7A /* daydream */,
 				E5DC694A2F7F8B3F00A40D7A /* Products */,
 			);
@@ -121,7 +118,6 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
-				A1B2C3D42FA103670046BEED /* DiaSaveImageExtension in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

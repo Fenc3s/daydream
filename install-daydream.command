@@ -220,9 +220,11 @@ fi
 print -- "Installing $APP_NAME to $INSTALL_PATH..."
 
 if [[ -w "/Applications" && ( ! -e "$INSTALL_PATH" || -w "$INSTALL_PATH" ) ]]; then
+    /bin/rm -rf "$INSTALL_PATH"
     /usr/bin/ditto "$BUILT_APP" "$INSTALL_PATH"
 else
     print -- "Administrator permission is required to write to /Applications."
+    /usr/bin/sudo /bin/rm -rf "$INSTALL_PATH"
     /usr/bin/sudo /usr/bin/ditto "$BUILT_APP" "$INSTALL_PATH"
 fi
 
