@@ -32,7 +32,7 @@ final class SettingsStore {
     private var cachedCredentials: [CredentialAccount: String] = [:]
 
     var fileURL: URL {
-        let domain = suiteName ?? Bundle.main.bundleIdentifier ?? "Homer.daydream"
+        let domain = suiteName ?? Bundle.main.bundleIdentifier ?? "com.daydream.app"
         return fileManager.urls(for: .libraryDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Preferences", isDirectory: true)
             .appendingPathComponent("\(domain).plist", isDirectory: false)
@@ -58,7 +58,7 @@ final class SettingsStore {
             self.userDefaults = userDefaults
             suiteName = nil
         } else if let directory {
-            let isolatedSuite = "Homer.daydream.tests.\(directory.lastPathComponent)"
+            let isolatedSuite = "com.daydream.app.tests.\(directory.lastPathComponent)"
             suiteName = isolatedSuite
             self.userDefaults = UserDefaults(suiteName: isolatedSuite) ?? .standard
         } else {

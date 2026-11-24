@@ -159,7 +159,7 @@ struct ProviderModelTests {
             }
             check(signedInSession.accessToken == "chatgpt-access-1", "Exchange authorization code for access token")
             check(signedInSession.clientID == "oaiapp_test123", "Persist dynamically issued oaiapp_ client_id")
-            check(signedInSession.displayIdentity == "homer@example.com", "Decode email claim from OIDC id_token")
+            check(signedInSession.displayIdentity == "user@example.com", "Decode email claim from OIDC id_token")
             check(signedInSession.hasDirectPlanUsageScope, "Verify chatgpt.tokens.use.direct scope")
             check(oauthCredStore.string(for: .chatGPTClientID) == "oaiapp_test123", "Store issued client_id in credential store")
             let refreshedToken = try await authService.validAccessToken(forceRefresh: true)
@@ -178,7 +178,7 @@ struct ProviderModelTests {
 
         let settingsDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
-            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(settingsDirectory.lastPathComponent)")
+            UserDefaults.standard.removePersistentDomain(forName: "com.daydream.app.tests.\(settingsDirectory.lastPathComponent)")
             try? FileManager.default.removeItem(at: settingsDirectory)
         }
         let preferenceStore = SettingsStore(directory: settingsDirectory)
@@ -222,12 +222,12 @@ struct ProviderModelTests {
         check(pendingPopup.canApply, "Apply becomes available once actual output exists")
 
         // Verify KeychainStore round-trip, plaintext JSON migration, and secret scrubbing.
-        let keychainService = "Homer.daydream.tests.\(UUID().uuidString)"
+        let keychainService = "com.daydream.app.tests.\(UUID().uuidString)"
         let testKeychain = KeychainStore(service: keychainService)
         defer { testKeychain.removeAll() }
         let secretDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
-            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(secretDir.lastPathComponent)")
+            UserDefaults.standard.removePersistentDomain(forName: "com.daydream.app.tests.\(secretDir.lastPathComponent)")
             try? FileManager.default.removeItem(at: secretDir)
         }
         try FileManager.default.createDirectory(at: secretDir, withIntermediateDirectories: true)
@@ -257,7 +257,7 @@ struct ProviderModelTests {
         // Verify corrupted settings.json is backed up and never overwritten with defaults.
         let corruptDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
-            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(corruptDir.lastPathComponent)")
+            UserDefaults.standard.removePersistentDomain(forName: "com.daydream.app.tests.\(corruptDir.lastPathComponent)")
             try? FileManager.default.removeItem(at: corruptDir)
         }
         try FileManager.default.createDirectory(at: corruptDir, withIntermediateDirectories: true)
@@ -409,7 +409,7 @@ struct ProviderModelTests {
                 inputSourceID: " \n "
             ),
             AppInputSourceRule(
-                bundleIdentifier: "  Homer.daydream  ",
+                bundleIdentifier: "  com.daydream.app  ",
                 appName: "daydream",
                 inputSourceID: "com.apple.keylayout.US"
             ),
@@ -447,7 +447,7 @@ struct ProviderModelTests {
         // Verify SettingsStore UserDefaults plist persistence and preservation of uninstalled third-party IME rules.
         let inputStoreDir = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         defer {
-            UserDefaults.standard.removePersistentDomain(forName: "Homer.daydream.tests.\(inputStoreDir.lastPathComponent)")
+            UserDefaults.standard.removePersistentDomain(forName: "com.daydream.app.tests.\(inputStoreDir.lastPathComponent)")
             try? FileManager.default.removeItem(at: inputStoreDir)
         }
         let localInputStore = SettingsStore(directory: inputStoreDir)
@@ -696,7 +696,7 @@ struct ProviderModelTests {
         mockBackend.selectedIDs.removeAll()
         for ignoredApp in [
             raycastApp,
-            RunningAppSnapshot(bundleIdentifier: "Homer.daydream", localizedName: "daydream", activationPolicy: .regular),
+            RunningAppSnapshot(bundleIdentifier: "com.daydream.app", localizedName: "daydream", activationPolicy: .regular),
             RunningAppSnapshot(bundleIdentifier: "com.apple.systemuiserver", localizedName: "SystemUIServer", activationPolicy: .regular),
         ] {
             mockBackend.frontmostApp = ignoredApp

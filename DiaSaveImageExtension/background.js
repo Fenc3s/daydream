@@ -1,5 +1,5 @@
 const menuID = "daydream-save-image-to-photos";
-const nativeHostName = "com.homer.daydream";
+const nativeHostName = "com.daydream.app";
 
 function registerContextMenu() {
   chrome.contextMenus.removeAll(() => {

@@ -67,7 +67,7 @@ final class ICloudPasswordsAutomationService: @unchecked Sendable {
     var onStatusChange: ((ICloudPasswordsAutomationStatus) -> Void)?
 
     private let logger: AppLogger
-    private let queue = DispatchQueue(label: "Homer.daydream.icloud-passwords-automation")
+    private let queue = DispatchQueue(label: "com.daydream.app.icloud-passwords-automation")
     private var workspaceObserverTokens: [NSObjectProtocol] = []
     private var browserAccessibilityObservers: [pid_t: AXObserver] = [:]
     private var burstTimer: DispatchSourceTimer?

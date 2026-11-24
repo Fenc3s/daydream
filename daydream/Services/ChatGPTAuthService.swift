@@ -584,7 +584,7 @@ private struct TokenEndpointResponse: Decodable {
 
 /// Minimal loopback HTTP server on `127.0.0.1` for receiving the Sign in with ChatGPT OAuth redirect.
 final class LoopbackOAuthServer: @unchecked Sendable {
-    private let queue = DispatchQueue(label: "Homer.daydream.chatgpt-oauth-callback")
+    private let queue = DispatchQueue(label: "com.daydream.app.chatgpt-oauth-callback")
     private var listener: NWListener?
     private var startContinuation: CheckedContinuation<UInt16, Error>?
     private var callbackContinuation: CheckedContinuation<URL, Error>?

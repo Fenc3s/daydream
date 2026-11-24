@@ -26,7 +26,7 @@ protocol CredentialStoring: Sendable {
 }
 
 struct KeychainStore: CredentialStoring {
-    static let defaultService = "Homer.daydream"
+    static let defaultService = "com.daydream.app"
 
     let service: String
 

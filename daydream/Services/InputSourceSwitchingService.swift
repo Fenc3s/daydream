@@ -1216,7 +1216,7 @@ final class InputSourceSwitchingService {
     }
 
     private nonisolated static func isDaydreamBundleIdentifier(_ bundleID: String) -> Bool {
-        if bundleID == "Homer.daydream" {
+        if bundleID == "com.daydream.app" || bundleID == "com.daydream.apple" {
             return true
         }
         if let mainBundleID = AppSettings.normalizedOptionalIdentifier(Bundle.main.bundleIdentifier),

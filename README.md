@@ -57,6 +57,6 @@ cd daydream
 
 Everything stays on your Mac:
 
-- **Settings:** macOS `UserDefaults` (`~/Library/Preferences/Homer.daydream.plist`)
-- **Credentials & API Keys:** macOS Keychain (`Homer.daydream`)
+- **Settings:** macOS `UserDefaults` (`~/Library/Preferences/com.daydream.app.plist`)
+- **Credentials & API Keys:** macOS Keychain (`com.daydream.app`)
 - **Clipboard History, Memory & Logs:** `~/Library/Application Support/daydream/`

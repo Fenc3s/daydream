@@ -297,7 +297,8 @@ struct AppSettings: Codable, Equatable, Sendable {
 
     static let systemIgnoredBundleIdentifiers: Set<String> = {
         var identifiers: Set<String> = [
-            "Homer.daydream",
+            "com.daydream.app",
+            "com.daydream.apple",
             "com.apple.systemuiserver",
             "com.apple.loginwindow",
             "com.apple.SecurityAgent",

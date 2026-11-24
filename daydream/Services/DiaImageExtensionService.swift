@@ -6,7 +6,7 @@ final class DiaImageExtensionService {
     static let shared = DiaImageExtensionService()
 
     static let extensionID = "elclpipnfhkjpcfkefflijpdieaelobd"
-    static let nativeHostName = "com.homer.daydream"
+    static let nativeHostName = "com.daydream.app"
 
     private let fileManager = FileManager.default
 

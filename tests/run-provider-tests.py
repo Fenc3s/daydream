@@ -62,7 +62,7 @@ class Handler(BaseHTTPRequestHandler):
                     import base64
                     header = base64.urlsafe_b64encode(b'{"alg":"RS256"}').decode().rstrip("=")
                     claims = base64.urlsafe_b64encode(
-                        json.dumps({"sub": "user_123", "email": "homer@example.com", "name": "Homer"}).encode()
+                        json.dumps({"sub": "user_123", "email": "user@example.com", "name": "Test User"}).encode()
                     ).decode().rstrip("=")
                     response = {
                         "access_token": "chatgpt-access-1",

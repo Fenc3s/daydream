@@ -283,7 +283,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 2.1.6;
-				PRODUCT_BUNDLE_IDENTIFIER = Homer.daydream;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daydream.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				PROVISIONING_PROFILE_SPECIFIER = "";
 				REGISTER_APP_GROUPS = YES;
@@ -316,7 +316,7 @@
 					"@executable_path/../Frameworks",
 				);
 				MARKETING_VERSION = 2.1.6;
-				PRODUCT_BUNDLE_IDENTIFIER = Homer.daydream;
+				PRODUCT_BUNDLE_IDENTIFIER = com.daydream.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				REGISTER_APP_GROUPS = YES;
 				STRING_CATALOG_GENERATE_SYMBOLS = YES;
